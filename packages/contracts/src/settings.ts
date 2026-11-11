@@ -134,6 +134,33 @@ export const DEFAULT_SNOOZE_PRESETS: ReadonlyArray<SnoozePresetSetting> = [
   { kind: "at", day: "monday", time: "09:00" },
 ];
 
+export const MAX_THREAD_STATUS_TYPES = 12;
+export const MAX_THREAD_STATUS_NAME_LENGTH = 40;
+export const ThreadStatusColor = Schema.Literals([
+  "green",
+  "yellow",
+  "orange",
+  "red",
+  "purple",
+  "blue",
+  "brown",
+  "gray",
+]);
+export type ThreadStatusColor = typeof ThreadStatusColor.Type;
+/** A status a thread can be marked with. Threads carry it as the tag `status:<id>`, so renaming keeps it. */
+export const ThreadStatusType = Schema.Struct({
+  id: Schema.String.check(Schema.isPattern(/^[a-z0-9-]{1,32}$/)),
+  name: Schema.String.check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(MAX_THREAD_STATUS_NAME_LENGTH),
+  ),
+  color: ThreadStatusColor,
+});
+export type ThreadStatusType = typeof ThreadStatusType.Type;
+export const ThreadStatusTypes = Schema.Array(ThreadStatusType).check(
+  Schema.isMaxLength(MAX_THREAD_STATUS_TYPES),
+);
+
 export const MIN_GLASS_OPACITY = 40;
 export const MAX_GLASS_OPACITY = 100;
 export const GlassOpacity = Schema.Int.check(
@@ -455,6 +482,8 @@ export const ClientSettingsSchema = Schema.Struct({
   confirmThreadArchive: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   confirmThreadDelete: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   confirmThreadUnpin: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  /** Tint a status's whole sidebar row in its color, rather than only a bar along its edge. */
+  threadStatusFillsRow: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   diffFilesCollapsed: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   diffIgnoreWhitespace: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   diffLayout: DiffLayout.pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_DIFF_LAYOUT))),
@@ -1424,6 +1453,8 @@ export const ServerSettings = Schema.Struct({
   snoozePresets: SnoozePresetSettings.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_SNOOZE_PRESETS)),
   ),
+  /** None until the user adds their own. */
+  threadStatusTypes: ThreadStatusTypes.pipe(Schema.withDecodingDefault(Effect.succeed([]))),
   /** Clients hide threads with these tags while `hideTaggedThreads` is on. Bad entries drop alone, so a hand edit cannot reset settings. */
   hiddenThreadTags: Schema.Array(Schema.Unknown).pipe(
     Schema.decodeTo(
@@ -1858,6 +1889,7 @@ export const ServerSettingsPatch = Schema.Struct({
   autoResumeLimitedThreads: Schema.optionalKey(Schema.Boolean),
   snoozeLimitedThreads: Schema.optionalKey(Schema.Boolean),
   snoozePresets: Schema.optionalKey(SnoozePresetSettings),
+  threadStatusTypes: Schema.optionalKey(ThreadStatusTypes),
   hiddenThreadTags: Schema.optionalKey(Schema.Array(Schema.String)),
   hideTaggedThreads: Schema.optionalKey(Schema.Boolean),
   guestSharingEnabled: Schema.optionalKey(Schema.Boolean),
@@ -1997,6 +2029,7 @@ export const ClientSettingsPatch = Schema.Struct({
   browserDefaultProfileId: Schema.optionalKey(BrowserProfileId),
   confirmQuit: Schema.optionalKey(QuitConfirmationMode),
   confirmThreadArchive: Schema.optionalKey(Schema.Boolean),
+  threadStatusFillsRow: Schema.optionalKey(Schema.Boolean),
   confirmThreadDelete: Schema.optionalKey(Schema.Boolean),
   confirmThreadUnpin: Schema.optionalKey(Schema.Boolean),
   diffFilesCollapsed: Schema.optionalKey(Schema.Boolean),

@@ -15,6 +15,7 @@ import * as TestClock from "effect/testing/TestClock";
 import type {
   OrchestrationProjectShell,
   ProjectId,
+  PullRequestListFilters,
   PullRequestReviewCapabilities,
   PullRequestReviewerCapabilities,
 } from "@t3tools/contracts";
@@ -3381,6 +3382,58 @@ it.effect("does not let a stale detail reopen overwrite a fresher linked summary
     const refreshed = yield* service.summary({ ...reference, allowStale: false });
     assert.strictEqual(refreshed.title, "updated after merge");
     assert.strictEqual(refreshed.state, "merged");
+  }),
+);
+
+it.effect("counts a review requested from the viewer's team as requested from the viewer", () =>
+  Effect.gen(function* () {
+    const service = yield* makeService({
+      projects: [project({ id: "p1", title: "web", workspaceRoot: "/a", repository: "acme/web" })],
+      providers: [
+        fakePullRequestProvider(SourceControlProviderKind.make("github"), {
+          listChangeRequests: () =>
+            Effect.succeed({
+              items: [
+                { ...changeRequest(1, "2026-07-02T00:00:00Z"), viewerTeamReviewRequested: true },
+                changeRequest(2, "2026-07-01T00:00:00Z"),
+              ],
+              truncated: false,
+              continues: false,
+            }),
+        }),
+      ],
+    });
+
+    const result = yield* service.list({ state: "open", involvement: "reviewing" });
+
+    assert.deepStrictEqual(
+      result.entries.map((entry) => [entry.number, entry.viewerReviewRequested]),
+      [
+        [1, true],
+        [2, false],
+      ],
+    );
+  }),
+);
+
+it.effect("hands a team filter through to the host listing", () =>
+  Effect.gen(function* () {
+    const asked: Array<PullRequestListFilters | undefined> = [];
+    const service = yield* makeService({
+      projects: [project({ id: "p1", title: "web", workspaceRoot: "/a", repository: "acme/web" })],
+      providers: [
+        fakePullRequestProvider(SourceControlProviderKind.make("github"), {
+          listChangeRequests: (input) => {
+            asked.push(input.filters);
+            return Effect.succeed({ items: [], truncated: false, continues: false });
+          },
+        }),
+      ],
+    });
+
+    yield* service.list({ state: "open", filters: { team: "acme/sca", labels: [["bug"]] } });
+
+    assert.deepStrictEqual(asked, [{ team: "acme/sca", labels: [["bug"]] }]);
   }),
 );
 

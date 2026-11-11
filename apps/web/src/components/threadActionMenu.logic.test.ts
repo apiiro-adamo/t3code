@@ -74,4 +74,33 @@ describe("buildThreadActionMenuItems", () => {
     expect(items.find((item) => item.id === "archive")?.disabled).toBe(true);
     expect(items.find((item) => item.id === "turn-into-project")?.disabled).toBe(true);
   });
+
+  it("lists the statuses with the thread's own checked, and hides the menu without them", () => {
+    const items = buildThreadActionMenuItems({
+      ...baseState,
+      status: {
+        types: [
+          { id: "in-review", name: "In review", color: "yellow" },
+          { id: "blocked", name: "Blocked", color: "red" },
+        ],
+        currentId: "blocked",
+      },
+    });
+    expect(
+      items
+        .find((item) => item.id === "status")
+        ?.children?.map((child) => [child.id, child.label, child.checked ?? false]),
+    ).toEqual([
+      ["set-status:in-review", "🟡 In review", false],
+      ["set-status:blocked", "🔴 Blocked", true],
+      ["clear-status", "No status", false],
+      ["edit-statuses", "Edit statuses…", false],
+    ]);
+    expect(buildThreadActionMenuItems(baseState).some((item) => item.id === "status")).toBe(false);
+    expect(
+      buildThreadActionMenuItems({ ...baseState, status: { types: [], currentId: null } })
+        .find((item) => item.id === "status")
+        ?.children?.map((child) => child.label),
+    ).toEqual(["Add statuses…"]);
+  });
 });

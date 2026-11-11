@@ -19,3 +19,9 @@ it("shows copy confirmation when the version is clicked without waiting for a ho
   expect(write).toHaveBeenCalledWith(APP_VERSION);
   await expect.element(page.getByText(/^Copied!?$/)).toBeVisible();
 });
+
+it("marks the version as a fork build", async () => {
+  await using screen = await render(<AboutVersionTitle />);
+
+  await expect.element(screen.getByText(/^fork( · [0-9a-f]+)?$/)).toBeVisible();
+});

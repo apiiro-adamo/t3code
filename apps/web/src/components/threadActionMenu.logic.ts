@@ -1,5 +1,8 @@
 import type { ContextMenuItem } from "@t3tools/contracts";
 import type { SnoozePreset } from "@t3tools/client-runtime/state/thread-settled";
+import type { ThreadStatusType } from "@t3tools/contracts/settings";
+
+import { THREAD_STATUS_COLORS } from "../threadStatus";
 
 export type ThreadActionMenuId =
   | "find"
@@ -17,6 +20,10 @@ export type ThreadActionMenuId =
   | "snooze"
   | `snooze:${string}`
   | "unsnooze"
+  | "status"
+  | `set-status:${string}`
+  | "clear-status"
+  | "edit-statuses"
   | "rename"
   | "regenerate-title"
   | "mark-unread"
@@ -95,6 +102,13 @@ export interface ThreadActionMenuState {
   readonly canShareWithGuest?: boolean;
   /** A No project thread with its own folder, on a server that can promote it. */
   readonly canTurnIntoProject?: boolean;
+  /** The statuses defined in settings and the one this thread has; absent hides the menu. */
+  readonly status?:
+    | {
+        readonly types: ReadonlyArray<ThreadStatusType>;
+        readonly currentId: string | null;
+      }
+    | undefined;
 }
 
 /** Local navigation, read markers, and copying remain available to read-only clients. */
@@ -103,6 +117,7 @@ export function threadActionRequiresOperate(action: ThreadActionMenuId): boolean
     "find",
     "new-thread-on-branch",
     "project-settings",
+    "edit-statuses",
     "mark-unread",
     "share-guest",
     "copy",
@@ -164,6 +179,37 @@ export function buildThreadActionMenuItems(
                   },
                 ],
               },
+        ]
+      : []),
+    ...(state.status
+      ? [
+          {
+            id: "status" as const,
+            label: "Status",
+            icon: "circle-check",
+            // With none defined yet, the menu only leads to where they are made.
+            children:
+              state.status.types.length === 0
+                ? [{ id: "edit-statuses" as const, label: "Add statuses…" }]
+                : [
+                    ...state.status.types.map((type) => ({
+                      id: `set-status:${type.id}` as const,
+                      label: `${THREAD_STATUS_COLORS[type.color].emoji} ${type.name}`,
+                      checked: state.status?.currentId === type.id,
+                    })),
+                    {
+                      id: "clear-status" as const,
+                      label: "No status",
+                      checked: state.status.currentId === null,
+                      separatorBefore: state.status.types.length > 0,
+                    },
+                    {
+                      id: "edit-statuses" as const,
+                      label: "Edit statuses…",
+                      separatorBefore: true,
+                    },
+                  ],
+          },
         ]
       : []),
     { id: "rename", label: "Rename thread", icon: "pencil", separatorBefore: true },

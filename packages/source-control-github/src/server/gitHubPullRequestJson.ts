@@ -16,6 +16,7 @@ import type {
   PullRequestCommit,
   PullRequestFileViewedState,
   PullRequestLabel,
+  PullRequestTeam,
   PullRequestMergeCapabilities,
   PullRequestMergeMethod,
   PullRequestOmittedFileStat,
@@ -348,6 +349,9 @@ export interface GitHubPullRequestListItem {
   readonly updatedAt: string;
   readonly reviewRequestLogins: ReadonlyArray<string>;
   readonly hasTeamReviewRequest: boolean;
+  /** Slugs of the requested teams, which belong to the repository owner's organization. */
+  readonly reviewRequestTeamSlugs?: ReadonlyArray<string>;
+  readonly viewerTeamReviewRequested?: boolean;
   readonly labels: ReadonlyArray<PullRequestLabel>;
   readonly checksState: PullRequestChecksState | null;
 }
@@ -559,6 +563,15 @@ function toReviewRequestLogins(
   });
 }
 
+function toReviewRequestTeamSlugs(
+  raw: ReadonlyArray<ReviewRequestFields> | undefined,
+): ReadonlyArray<string> {
+  return (raw ?? []).flatMap((request) => {
+    const slug = trimmed(request.login) === null ? trimmed(request.slug) : null;
+    return slug === null ? [] : [slug];
+  });
+}
+
 function hasTeamReviewRequest(raw: ReadonlyArray<ReviewRequestFields> | undefined): boolean {
   return (raw ?? []).some(
     (request) =>
@@ -761,6 +774,7 @@ function toListItem(raw: ListItemFields): GitHubPullRequestListItem {
     updatedAt: raw.updatedAt,
     reviewRequestLogins: toReviewRequestLogins(raw.reviewRequests),
     hasTeamReviewRequest: hasTeamReviewRequest(raw.reviewRequests),
+    reviewRequestTeamSlugs: toReviewRequestTeamSlugs(raw.reviewRequests),
     labels: toLabels(raw.labels),
     checksState: rollupChecksState(raw.statusCheckRollup),
   };
@@ -1559,6 +1573,41 @@ export function toReviewerCandidates(
   };
 }
 
+/** Offer the organization's teams after the people, leaving out the ones already asked. */
+export function withTeamCandidates(
+  list: PullRequestReviewerCandidateList,
+  teams: ReadonlyArray<PullRequestTeam>,
+  query?: string,
+): PullRequestReviewerCandidateList {
+  const needle = query?.trim().toLowerCase() ?? "";
+  const asked = new Set(
+    list.candidates.flatMap((candidate) =>
+      candidate.kind === "team" ? [candidate.id.toLowerCase()] : [],
+    ),
+  );
+  const offered = teams.flatMap((team): ReadonlyArray<PullRequestReviewerCandidate> => {
+    const slug = team.slug.slice(team.slug.indexOf("/") + 1);
+    if (asked.has(slug.toLowerCase())) return [];
+    if (
+      needle.length > 0 &&
+      !team.slug.toLowerCase().includes(needle) &&
+      !team.name.toLowerCase().includes(needle)
+    )
+      return [];
+    return [
+      {
+        id: slug,
+        kind: "team",
+        login: team.slug,
+        name: team.name,
+        avatarUrl: null,
+        isRequested: false,
+      },
+    ];
+  });
+  return { ...list, candidates: [...list.candidates, ...offered] };
+}
+
 const ReviewerRequestSchema = Schema.Struct({
   reviewers: Schema.Array(Schema.String),
   team_reviewers: Schema.Array(Schema.String),
@@ -1915,4 +1964,37 @@ export function decodePullRequestStacksJson(
       state: toState({ state: pullRequest.state, mergedAt: pullRequest.merged_at }),
     })),
   });
+}
+
+const decodeTeams = decodeJsonResult(
+  Schema.Array(
+    Schema.Struct({
+      slug: Schema.String,
+      name: Schema.String,
+      organization: Schema.optional(Schema.Struct({ login: Schema.String })),
+    }),
+  ),
+);
+
+/** A REST team listing, as `org/slug` teams; `org` names the owner for org-scoped listings. */
+export function decodeTeamsJson(
+  org?: string,
+): (raw: string) => Result.Result<ReadonlyArray<PullRequestTeam>, DecodeFailure> {
+  return (raw) =>
+    Result.map(decodeTeams(raw), (teams) =>
+      teams.flatMap((team) => {
+        const owner = team.organization?.login ?? org;
+        if (owner === undefined || (org !== undefined && owner.toLowerCase() !== org.toLowerCase()))
+          return [];
+        return [{ slug: `${owner}/${team.slug}`, name: team.name }];
+      }),
+    );
+}
+
+const decodeLogins = decodeJsonResult(Schema.Array(Schema.Struct({ login: Schema.String })));
+
+export function decodeTeamMembersJson(
+  raw: string,
+): Result.Result<ReadonlyArray<string>, DecodeFailure> {
+  return Result.map(decodeLogins(raw), (members) => members.map((member) => member.login));
 }

@@ -16,6 +16,7 @@ import {
 import { useRouter } from "@tanstack/react-router";
 
 import { pickSnoozePreset, resolveSnoozePresets } from "../components/Sidebar.snooze";
+import { readThreadStatusMenu, THREAD_STATUS_SETTINGS_LINK } from "../components/Sidebar.status";
 import {
   buildThreadActionMenuItems,
   threadActionRequiresOperate,
@@ -83,6 +84,7 @@ export function useThreadActionMenu(input: {
     pinThread,
     confirmAndUnpinThread,
     setThreadAutoSettle,
+    setThreadStatus,
     archiveThread,
     deleteThread,
     markThreadUnread,
@@ -149,6 +151,7 @@ export function useThreadActionMenu(input: {
         snoozePresets,
         canShareWithGuest,
         canTurnIntoProject: canTurnThreadIntoProject(threadRef),
+        status: readThreadStatusMenu(threadRef),
       });
       const clicked = await settlePromise(() => api.contextMenu.show(items, position));
       if (clicked._tag === "Failure" || clicked.value === null) return;
@@ -189,7 +192,19 @@ export function useThreadActionMenu(input: {
           failureToast(title, squashAtomCommandFailure(result));
         }
       };
+      if (action.startsWith("set-status:") || action === "clear-status") {
+        await reportFailure("Failed to set thread status", () =>
+          setThreadStatus(
+            threadRef,
+            action.startsWith("set-status:") ? action.slice("set-status:".length) : null,
+          ),
+        );
+        return;
+      }
       switch (action) {
+        case "edit-statuses":
+          void router.navigate(THREAD_STATUS_SETTINGS_LINK);
+          return;
         case "find":
           onFind?.(threadRef);
           return;

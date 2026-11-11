@@ -196,6 +196,7 @@ export function usePullRequestQueryFilters(search: PullRequestsSearch, typedQuer
     ...(search.review ? { review: search.review } : {}),
     ...(search.checks ? { checks: search.checks } : {}),
     ...(search.author ? { author: search.author } : {}),
+    ...(search.team ? { team: search.team } : {}),
     ...(search.labels ? { labels: search.labels.map((label) => [label]) } : {}),
   };
   const menuFiltered = Object.keys(menuFilters).length > 0;

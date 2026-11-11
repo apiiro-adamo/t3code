@@ -444,6 +444,20 @@ export const SETTINGS_SEARCH_ITEMS = [
     scope: "environment-defaults",
   },
   {
+    id: "thread-statuses",
+    title: "Statuses",
+    to: "/settings/threads",
+    searchTerms: ["status color label tag in progress review blocked done sidebar mark"],
+    environmentOnly: true,
+    scope: "environment-defaults",
+  },
+  {
+    id: "thread-status-fills-row",
+    title: "Color whole row",
+    to: "/settings/threads",
+    searchTerms: ["status color background tint fill highlight sidebar row"],
+  },
+  {
     id: "snooze-limited-threads",
     title: "Snooze until limits reset",
     to: "/settings/threads",

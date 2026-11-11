@@ -228,6 +228,7 @@ import {
   snoozeWakeLabel,
   type SnoozePreset,
 } from "./Sidebar.snooze";
+import { readThreadStatusMenu, THREAD_STATUS_SETTINGS_LINK } from "./Sidebar.status";
 import { ProjectFavicon } from "./ProjectFavicon";
 import { deriveProviderEntriesByEnvironment } from "../providerInstances";
 import { useStableCallback } from "../hooks/useStableCallback";
@@ -926,6 +927,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     unpinThread,
     confirmAndUnpinThread,
     setThreadAutoSettle,
+    setThreadStatus,
     turnThreadIntoProject,
     reorderPinnedThread,
     reorderActiveThread,
@@ -2647,6 +2649,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                 canShareWithGuestAtom(threadRef.environmentId),
               ),
               canTurnIntoProject: canTurnThreadIntoProject(threadRef),
+              status: readThreadStatusMenu(threadRef),
               supports: {
                 settlement: configLoaded,
                 autoSettleOptOut: supportsAutoSettleOptOut,
@@ -2674,7 +2677,27 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
           if (preset) attemptSnooze(threadRef, preset);
           return;
         }
+        if (clicked.value.startsWith("set-status:") || clicked.value === "clear-status") {
+          const statusId = clicked.value.startsWith("set-status:")
+            ? clicked.value.slice("set-status:".length)
+            : null;
+          const result = await setThreadStatus(threadRef, statusId);
+          if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+            const error = squashAtomCommandFailure(result);
+            toastManager.add(
+              stackedThreadToast({
+                type: "error",
+                title: "Failed to set thread status",
+                description: error instanceof Error ? error.message : "An error occurred.",
+              }),
+            );
+          }
+          return;
+        }
         switch (clicked.value) {
+          case "edit-statuses":
+            void router.navigate(THREAD_STATUS_SETTINGS_LINK);
+            return;
           case "filter-by-project":
             if (threadProjectGroup) {
               setProjectScopeKeys(

@@ -30,6 +30,7 @@ vi.mock(import("~/state/pullRequests"), async (original) => ({
   ...(await original()),
   usePullRequestFilterOptions: (targets: ReadonlyArray<unknown>) => ({
     labels: [],
+    teams: [],
     authors:
       targets.length === 0
         ? []

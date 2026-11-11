@@ -62,6 +62,7 @@ import { scopedIdleCompaction } from "./scopedSettings";
 import { ProjectDefaultsSettings } from "./ProjectDefaultsSettings";
 import { ThreadTitleInstructionsSettings } from "./ThreadTitleInstructionsSettings";
 import { SnoozePresetsRow } from "./SnoozePresetsSettings";
+import { ThreadStatusTypesRow } from "./ThreadStatusTypesSettings";
 import { useDesktopUpdateState } from "../../state/desktopUpdate";
 import { managedTelemetryOffMessage, usePrimaryManagedPolicy } from "../../state/managedPolicy";
 import {
@@ -569,6 +570,9 @@ export function useSettingsRestore(onRestored?: () => void) {
     ...(settings.confirmThreadArchive !== DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive
       ? ["Archive confirmation"]
       : []),
+    ...(settings.threadStatusFillsRow !== DEFAULT_UNIFIED_SETTINGS.threadStatusFillsRow
+      ? ["Status row coloring"]
+      : []),
     ...(settings.confirmThreadDelete !== DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete
       ? ["Delete confirmation"]
       : []),
@@ -679,6 +683,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       ghqCloneLayout: DEFAULT_UNIFIED_SETTINGS.ghqCloneLayout,
       confirmThreadArchive: DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive,
       confirmThreadDelete: DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete,
+      threadStatusFillsRow: DEFAULT_UNIFIED_SETTINGS.threadStatusFillsRow,
       confirmThreadUnpin: DEFAULT_UNIFIED_SETTINGS.confirmThreadUnpin,
       confirmQuit: DEFAULT_UNIFIED_SETTINGS.confirmQuit,
       textGenerationModelSelection: DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection,
@@ -1646,6 +1651,37 @@ export function ThreadsSettingsPanel() {
       {!isProjectScope ? (
         <SettingsSection id="snooze" title="Snooze">
           <SnoozePresetsRow />
+        </SettingsSection>
+      ) : null}
+
+      {!isProjectScope ? (
+        <SettingsSection id="statuses" title="Statuses">
+          <ThreadStatusTypesRow />
+          <SettingsRow
+            {...searchableSetting("thread-status-fills-row")}
+            description="Tint the whole sidebar row in its status color, instead of a bar along its left edge."
+            resetAction={
+              settings.threadStatusFillsRow !== DEFAULT_UNIFIED_SETTINGS.threadStatusFillsRow ? (
+                <SettingResetButton
+                  label="row coloring"
+                  onClick={() =>
+                    updateSettings({
+                      threadStatusFillsRow: DEFAULT_UNIFIED_SETTINGS.threadStatusFillsRow,
+                    })
+                  }
+                />
+              ) : null
+            }
+            control={
+              <Switch
+                checked={settings.threadStatusFillsRow}
+                onCheckedChange={(checked) =>
+                  updateSettings({ threadStatusFillsRow: Boolean(checked) })
+                }
+                aria-label="Color the whole row in its status color"
+              />
+            }
+          />
         </SettingsSection>
       ) : null}
 

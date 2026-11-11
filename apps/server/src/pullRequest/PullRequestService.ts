@@ -48,6 +48,7 @@ import {
   type PullRequestFilterOptionsInput,
   type PullRequestActor,
   type PullRequestReferenceCandidate,
+  type PullRequestTeam,
   type PullRequestLabel,
   type PullRequestListStatsResult,
   type PullRequestProviderSummary,
@@ -624,6 +625,9 @@ function withRateLimitBackoff(
             api.searchRepositoryAuthors,
           ),
         }),
+    ...(api.listRepositoryTeams === undefined
+      ? {}
+      : { listRepositoryTeams: interactive("listRepositoryTeams", api.listRepositoryTeams) }),
     ...(api.searchRepositoryReferences === undefined
       ? {}
       : {
@@ -1270,7 +1274,8 @@ export const make = Effect.gen(function* () {
         : { checksState: input.item.checksState }),
       viewerReviewRequested:
         input.item.author?.login.toLowerCase() !== viewer &&
-        input.item.reviewRequestLogins.some((login) => login.toLowerCase() === viewer),
+        (input.item.viewerTeamReviewRequested === true ||
+          input.item.reviewRequestLogins.some((login) => login.toLowerCase() === viewer)),
       labels: input.item.labels,
       ...(input.item.reviewDecision === undefined || input.item.reviewDecision === null
         ? {}
@@ -2595,6 +2600,17 @@ export const make = Effect.gen(function* () {
       });
       return { labels: items, authors: [], references: [], truncated };
     }
+    if (input.kind === "teams") {
+      const pages = yield* gather<PullRequestTeam>((project) =>
+        project.api.listRepositoryTeams?.(refOf(project)),
+      );
+      const { items, truncated } = rankFilterOptions(pages, {
+        query: input.query,
+        keyOf: (team) => team.slug,
+        textsOf: (team) => [team.name, team.slug],
+      });
+      return { labels: [], authors: [], references: [], teams: items, truncated };
+    }
     if (input.kind === "references") {
       const pages = yield* gather<PullRequestReferenceCandidate>((project) =>
         project.api.searchRepositoryReferences?.({ ...refOf(project), sigil: input.sigil }),
@@ -2951,7 +2967,7 @@ export const make = Effect.gen(function* () {
       string | ReadonlyArray<string> | ReadonlyArray<ReadonlyArray<string>> | null
     >,
   ): PullRequestListFilters => {
-    const [draft, review, checks, author, labels, excludedLabels] = slots;
+    const [draft, review, checks, author, labels, excludedLabels, team] = slots;
     return {
       ...(typeof draft === "string" ? { draft: draft as "only" | "hide" } : {}),
       ...(typeof review === "string" ? { review: review as PullRequestListFilters["review"] } : {}),
@@ -2959,6 +2975,7 @@ export const make = Effect.gen(function* () {
       ...(typeof author === "string" ? { author } : {}),
       ...(Array.isArray(labels) ? { labels: labels as ReadonlyArray<ReadonlyArray<string>> } : {}),
       ...(Array.isArray(excludedLabels) ? { excludedLabels } : {}),
+      ...(typeof team === "string" ? { team } : {}),
     };
   };
 
@@ -3086,6 +3103,7 @@ export const make = Effect.gen(function* () {
             input.filters.author ?? null,
             input.filters.labels ?? null,
             input.filters.excludedLabels ?? null,
+            input.filters.team ?? null,
           ],
       input.projectId ?? null,
       input.projectIds === undefined ? null : [...input.projectIds].sort(),

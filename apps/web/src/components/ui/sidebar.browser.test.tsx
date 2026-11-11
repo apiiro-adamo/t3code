@@ -73,6 +73,42 @@ describe("Sidebar", () => {
   });
 });
 
+it("fades a collapsed sidebar in while the pointer rests on the window edge", async () => {
+  await page.viewport(1280, 800);
+  await using screen = await render(
+    <SidebarProvider defaultOpen={false}>
+      <Sidebar collapsible="offcanvas" peekOnHover>
+        <button type="button">Thread</button>
+      </Sidebar>
+      <main>Page</main>
+    </SidebarProvider>,
+    { router: false /* no routes involved */ },
+  );
+  const sidebar = screen.container.querySelector<HTMLElement>('[data-slot="sidebar"]')!;
+  const zone = screen.container.querySelector<HTMLElement>('[data-slot="sidebar-peek-zone"]')!;
+  const panel = screen.container.querySelector<HTMLElement>('[data-slot="sidebar-container"]')!;
+  const content = screen.container.querySelector("main")!;
+  const opacity = () => Number(getComputedStyle(panel).opacity);
+  const moveOver = (target: Element) =>
+    target.dispatchEvent(new PointerEvent("pointermove", { bubbles: true }));
+  expect(sidebar.inert).toBe(true);
+
+  // Tests render without the app stylesheet, so the zone has no box to hover; React derives
+  // mouseenter from this pointer crossing.
+  content.dispatchEvent(new MouseEvent("mouseout", { bubbles: true, relatedTarget: zone }));
+  zone.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, relatedTarget: content }));
+  await vi.waitFor(() => expect(sidebar.dataset.peeking).toBe("true"));
+  expect(sidebar.inert).toBe(false);
+  expect(panel.getAnimations()[0]?.effect?.getTiming().duration).toBeGreaterThan(0);
+  await vi.waitFor(() => expect(opacity()).toBe(1));
+
+  moveOver(content);
+  await vi.waitFor(() => expect(sidebar.dataset.peeking).toBeUndefined());
+  expect(sidebar.inert).toBe(true);
+  // Parked off screen still transparent, so moving away never flashes the sidebar.
+  expect(opacity()).toBe(0);
+});
+
 it("restores collapsed and expanded desktop state after remounting", async () => {
   await page.viewport(1280, 800);
   const storageKey = "sidebar_persistence_test";

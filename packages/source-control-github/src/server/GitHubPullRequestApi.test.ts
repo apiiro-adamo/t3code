@@ -1862,6 +1862,60 @@ layer("GitHubPullRequestApi.layer", (it) => {
     }),
   );
 
+  it.effect("lists a team's change requests by searching for any of its members as author", () =>
+    Effect.gen(function* () {
+      mockedExecute.mockImplementation((call) =>
+        Effect.succeed(
+          call.kind === "rest"
+            ? output(encodeJson([{ login: "ann" }, { login: "bo" }]))
+            : call.operationName === "PullRequestList"
+              ? emptyList()
+              : emptySearch(),
+        ),
+      );
+      const cli = yield* GitHubPullRequestApi.GitHubPullRequestApi;
+
+      yield* cli.listPullRequests({
+        cwd: "/w",
+        repository: "acme/web",
+        host: "github.com",
+        state: "open",
+        involvement: "all",
+        viewer: "bilal",
+        limit: 10,
+        filters: { team: "acme/sca" },
+      });
+
+      expect(pathAt(0)).toBe("orgs/acme/teams/sca/members?per_page=100");
+      expect(searchOfCall(1)).toBe(
+        'is:pr is:open author:"ann" author:"bo" sort:updated-desc repo:acme/web',
+      );
+    }),
+  );
+
+  it.effect("answers an empty team with no change requests instead of every one", () =>
+    Effect.gen(function* () {
+      mockedExecute.mockImplementation((call) =>
+        Effect.succeed(call.kind === "rest" ? output("[]") : emptySearch()),
+      );
+      const cli = yield* GitHubPullRequestApi.GitHubPullRequestApi;
+
+      const batch = yield* cli.listPullRequests({
+        cwd: "/w",
+        repository: "acme/web",
+        host: "github.com",
+        state: "open",
+        involvement: "all",
+        viewer: "bilal",
+        limit: 10,
+        filters: { team: "acme/empty" },
+      });
+
+      assert.deepStrictEqual(batch.items, []);
+      assert.strictEqual(mockedExecute.mock.calls.length, 1);
+    }),
+  );
+
   it.effect("sends one label qualifier per group, its names joined the way GitHub ors them", () =>
     Effect.gen(function* () {
       mockedExecute.mockImplementation((call) =>
@@ -2035,6 +2089,13 @@ layer("GitHubPullRequestApi.layer", (it) => {
           ),
         ),
       );
+      mockedExecute.mockReturnValueOnce(
+        Effect.succeed(
+          output(
+            encodeJson([{ slug: "platform", name: "Platform", organization: { login: "acme" } }]),
+          ),
+        ),
+      );
       const cli = yield* GitHubPullRequestApi.GitHubPullRequestApi;
 
       const batch = yield* cli.listPullRequests({
@@ -2050,6 +2111,12 @@ layer("GitHubPullRequestApi.layer", (it) => {
       expect(batch.items.map((item) => item.number)).toEqual([1, 2]);
       expect(searchOfCall(1)).toBeUndefined();
       assert.isFalse(batch.continues);
+      // The viewer is on the requested team, so that request is the viewer's too.
+      expect(pathAt(2)).toBe("user/teams?per_page=100");
+      expect(batch.items.map((item) => item.viewerTeamReviewRequested === true)).toEqual([
+        false,
+        true,
+      ]);
     }),
   );
 
@@ -3953,7 +4020,7 @@ layer("GitHubPullRequestApi.layer", (it) => {
 
   it.effect("reads who may review and who already has in one request", () =>
     Effect.gen(function* () {
-      mockedExecute.mockReturnValue(
+      mockedExecute.mockReturnValueOnce(
         Effect.succeed(
           output(
             encodeJson({
@@ -3988,6 +4055,16 @@ layer("GitHubPullRequestApi.layer", (it) => {
           ),
         ),
       );
+      mockedExecute.mockReturnValueOnce(
+        Effect.succeed(
+          output(
+            encodeJson([
+              { slug: "platform", name: "Platform", organization: { login: "acme" } },
+              { slug: "web", name: "Web", organization: { login: "acme" } },
+            ]),
+          ),
+        ),
+      );
       const cli = yield* GitHubPullRequestApi.GitHubPullRequestApi;
 
       const list = yield* cli.listReviewerCandidates({
@@ -3997,18 +4074,23 @@ layer("GitHubPullRequestApi.layer", (it) => {
         number: 7,
       });
 
-      assert.strictEqual(mockedExecute.mock.calls.length, 1);
+      assert.strictEqual(mockedExecute.mock.calls.length, 2);
       expect(varsAt(0)).toMatchObject({ owner: "acme", name: "web", number: 7 });
-      expect(list.candidates.map((candidate) => [candidate.login, candidate.isRequested])).toEqual([
-        ["octocat", true],
-        ["hubot", false],
+      assert.strictEqual(pathAt(1), "orgs/acme/teams?per_page=100");
+      expect(
+        list.candidates.map((candidate) => [candidate.kind, candidate.id, candidate.isRequested]),
+      ).toEqual([
+        ["user", "octocat", true],
+        ["user", "hubot", false],
+        ["team", "platform", false],
+        ["team", "web", false],
       ]);
     }),
   );
 
   it.effect("asks GitHub to search everyone assignable when the reviewer menu has a query", () =>
     Effect.gen(function* () {
-      mockedExecute.mockReturnValue(
+      mockedExecute.mockReturnValueOnce(
         Effect.succeed(
           output(
             encodeJson({
@@ -4037,6 +4119,16 @@ layer("GitHubPullRequestApi.layer", (it) => {
           ),
         ),
       );
+      mockedExecute.mockReturnValueOnce(
+        Effect.succeed(
+          output(
+            encodeJson([
+              { slug: "octo-reviewers", name: "Octo reviewers", organization: { login: "acme" } },
+              { slug: "web", name: "Web", organization: { login: "acme" } },
+            ]),
+          ),
+        ),
+      );
       const cli = yield* GitHubPullRequestApi.GitHubPullRequestApi;
 
       const list = yield* cli.listReviewerCandidates({
@@ -4050,6 +4142,72 @@ layer("GitHubPullRequestApi.layer", (it) => {
       expect(varsAt(0)).toMatchObject({ owner: "acme", name: "web", number: 7, query: "octo" });
       expect(list.candidates.map((candidate) => [candidate.login, candidate.isRequested])).toEqual([
         ["octocat", true],
+        ["acme/octo-reviewers", false],
+      ]);
+    }),
+  );
+
+  it.effect("offers a team once, and keeps the people when the teams cannot be read", () =>
+    Effect.gen(function* () {
+      const candidates = (teamPage: string) => {
+        mockedExecute.mockReturnValueOnce(
+          Effect.succeed(
+            output(
+              encodeJson({
+                data: {
+                  repository: {
+                    assignableUsers: {
+                      pageInfo: { hasNextPage: false },
+                      nodes: [{ login: "hubot", name: null, avatarUrl: "https://avatars/hubot" }],
+                    },
+                    pullRequest: {
+                      author: { __typename: "User", login: "bilal" },
+                      reviewRequests: {
+                        nodes: [
+                          {
+                            requestedReviewer: {
+                              __typename: "Team",
+                              slug: "platform",
+                              combinedSlug: "acme/platform",
+                              teamName: "Platform",
+                              teamAvatarUrl: null,
+                            },
+                          },
+                        ],
+                      },
+                    },
+                  },
+                },
+              }),
+            ),
+          ),
+        );
+        mockedExecute.mockReturnValueOnce(Effect.succeed(output(teamPage)));
+        mockedExecute.mockReturnValueOnce(Effect.succeed(output(teamPage)));
+      };
+      const cli = yield* GitHubPullRequestApi.GitHubPullRequestApi;
+      const read = cli.listReviewerCandidates({
+        cwd: "/w",
+        repository: "acme/web",
+        host: "github.com",
+        number: 7,
+      });
+
+      candidates(
+        encodeJson([{ slug: "platform", name: "Platform", organization: { login: "acme" } }]),
+      );
+      const listed = yield* read;
+      expect(listed.candidates.map((candidate) => [candidate.kind, candidate.id])).toEqual([
+        ["team", "platform"],
+        ["user", "hubot"],
+      ]);
+
+      mockedExecute.mockReset();
+      candidates("not json");
+      const withoutTeams = yield* read;
+      expect(withoutTeams.candidates.map((candidate) => [candidate.kind, candidate.id])).toEqual([
+        ["team", "platform"],
+        ["user", "hubot"],
       ]);
     }),
   );

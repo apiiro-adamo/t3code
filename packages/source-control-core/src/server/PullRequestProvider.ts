@@ -6,6 +6,7 @@ import type {
   PullRequestStackHead,
   PullRequestActor,
   PullRequestReferenceCandidate,
+  PullRequestTeam,
   PullRequestReferenceSigil,
   PullRequestBaseComparison,
   PullRequestCapabilities,
@@ -99,6 +100,8 @@ export interface ProviderChangeRequest {
   readonly mergedAt?: string | null;
   readonly updatedAt: string;
   readonly reviewRequestLogins: ReadonlyArray<string>;
+  /** A team the viewer belongs to is asked to review, which asks the viewer too. */
+  readonly viewerTeamReviewRequested?: boolean | undefined;
   readonly labels: ReadonlyArray<PullRequestLabel>;
   readonly reviewDecision?: PullRequestReviewDecision | null | undefined;
   readonly checksState?: PullRequestChecksState | null | undefined;
@@ -560,6 +563,14 @@ export interface PullRequestProviderApi {
   readonly searchRepositoryAuthors?: (
     input: ProviderRepositoryRef & { readonly query?: string | undefined },
   ) => Effect.Effect<ProviderFilterOptionPage<PullRequestActor>, PullRequestProviderError>;
+
+  /**
+   * Teams in the repository owner's organization, for narrowing a listing to the change requests
+   * their members opened. `query` narrows by name; the caller still matches the answer against it.
+   */
+  readonly listRepositoryTeams?: (
+    input: ProviderRepositoryRef & { readonly query?: string | undefined },
+  ) => Effect.Effect<ProviderFilterOptionPage<PullRequestTeam>, PullRequestProviderError>;
 
   /**
    * Issues and change requests a composer can reference, recently updated first. A numeric

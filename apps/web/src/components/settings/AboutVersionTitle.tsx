@@ -1,6 +1,6 @@
 import { useRef } from "react";
 
-import { APP_VERSION } from "../../branding";
+import { APP_VERSION, FORK_BUILD_COMMIT } from "../../branding";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { showAnchoredCopySuccessToast } from "../ui/anchoredCopyToast";
 import { InlineButton } from "../ui/button";
@@ -43,6 +43,9 @@ export function AboutVersionTitle() {
           <TooltipPopup>Copy version</TooltipPopup>
         </Tooltip>
       </code>
+      <span className="text-2xs text-muted-foreground">
+        {FORK_BUILD_COMMIT ? `fork · ${FORK_BUILD_COMMIT}` : "fork"}
+      </span>
     </span>
   );
 }

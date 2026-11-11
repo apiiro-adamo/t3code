@@ -268,11 +268,145 @@ function resolveSidebarResizable({
   };
 }
 
+const SIDEBAR_PEEK_OPEN_DELAY_MS = 120;
+const SIDEBAR_PEEK_CLOSE_DELAY_MS = 250;
+const SIDEBAR_PEEK_FADE_MS = 180;
+// Menus, dialogs and tooltips opened from the peeking sidebar render in portals outside it.
+const SIDEBAR_PEEK_POPUP = '[data-slot$="-popup"], [data-slot$="-positioner"]';
+
+/**
+ * idle: no peek since the sidebar last collapsed, so collapse keeps its own animation.
+ * shown, leaving: on screen over the page, faded in or fading out.
+ * parked: back off screen after a peek, kept transparent so the move away never shows.
+ */
+type SidebarPeekPhase = "idle" | "shown" | "leaving" | "parked";
+
+/**
+ * Fades a collapsed offcanvas sidebar in over the page while the pointer rests on the window
+ * edge, and out once the pointer moves elsewhere. The page layout never moves.
+ */
+function useSidebarPeek(enabled: boolean, side: "left" | "right") {
+  const { onCollapse } = useSidebar();
+  const [phase, setPhase] = React.useState<SidebarPeekPhase>("idle");
+  const [container, setContainer] = React.useState<HTMLDivElement | null>(null);
+  const openTimer = React.useRef<number | null>(null);
+  const closeTimer = React.useRef<number | null>(null);
+  // Where the next fade starts, so a fade cut short reverses from where it got to.
+  const fadeFrom = React.useRef(0);
+  const active = enabled ? phase : "idle";
+  const visible = active === "shown" || active === "leaving";
+  const clearTimer = (timer: React.RefObject<number | null>) => {
+    if (timer.current === null) return;
+    window.clearTimeout(timer.current);
+    timer.current = null;
+  };
+  const show = () => {
+    clearTimer(closeTimer);
+    if (active === "leaving") {
+      setPhase("shown");
+      return;
+    }
+    if (active === "shown" || openTimer.current !== null) return;
+    openTimer.current = window.setTimeout(() => {
+      openTimer.current = null;
+      fadeFrom.current = 0;
+      setPhase((current) => (current === "idle" || current === "parked" ? "shown" : current));
+    }, SIDEBAR_PEEK_OPEN_DELAY_MS);
+  };
+  const cancelShow = () => clearTimer(openTimer);
+  const close = () => {
+    closeTimer.current = null;
+    // Keep the sidebar while a menu or dialog it opened has focus, so the popup keeps its anchor.
+    if (document.activeElement?.closest(SIDEBAR_PEEK_POPUP)) {
+      closeTimer.current = window.setTimeout(close, SIDEBAR_PEEK_CLOSE_DELAY_MS);
+      return;
+    }
+    moveFocusOutOfCollapsingSidebar();
+    setPhase((current) => (current === "shown" ? "leaving" : current));
+  };
+  const onPointerMove = React.useEffectEvent((target: EventTarget | null) => {
+    const over =
+      target instanceof Element &&
+      (container?.contains(target) === true || target.closest(SIDEBAR_PEEK_POPUP) !== null);
+    if (over) {
+      show();
+    } else if (closeTimer.current === null && active === "shown") {
+      closeTimer.current = window.setTimeout(close, SIDEBAR_PEEK_CLOSE_DELAY_MS);
+    }
+  });
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- resets the peek when the sidebar collapses for real and cancels pending peek timers on unmount
+  React.useEffect(() => {
+    const stopListening = onCollapse(() => setPhase("idle"));
+    return () => {
+      stopListening();
+      if (openTimer.current !== null) window.clearTimeout(openTimer.current);
+      if (closeTimer.current !== null) window.clearTimeout(closeTimer.current);
+    };
+  }, [onCollapse]);
+  // Follows the pointer across the whole window rather than trusting enter and leave events on
+  // the sidebar, which Electron drops over the title bar's drag regions.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- listens to document pointer moves while the peek is on screen to decide when it closes
+  React.useEffect(() => {
+    if (!visible) return;
+    const onMove = (event: PointerEvent) => onPointerMove(event.target);
+    document.addEventListener("pointermove", onMove);
+    return () => document.removeEventListener("pointermove", onMove);
+  }, [visible]);
+  // Runs the fades with the Web Animations API, which starts from the first painted frame instead
+  // of depending on the browser noticing a style change between renders.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- drives the container's fade animation for the current peek phase and parks it when the fade-out finishes
+  React.useLayoutEffect(() => {
+    if (!container || !visible) return;
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const offset = side === "left" ? "-0.5rem 0" : "0.5rem 0";
+    const from = fadeFrom.current;
+    const fadingIn = active === "shown";
+    const remaining = fadingIn ? 1 - from : from;
+    const animation = container.animate(
+      fadingIn
+        ? [
+            { opacity: from, translate: from === 0 ? offset : "0 0" },
+            { opacity: 1, translate: "0 0" },
+          ]
+        : [
+            { opacity: from, translate: "0 0" },
+            { opacity: 0, translate: offset },
+          ],
+      {
+        duration: reduceMotion ? 0 : SIDEBAR_PEEK_FADE_MS * remaining,
+        easing: fadingIn ? "ease-out" : "ease-in",
+        fill: "forwards",
+      },
+    );
+    if (!fadingIn) {
+      animation.onfinish = () =>
+        setPhase((current) => (current === "leaving" ? "parked" : current));
+    }
+    return () => {
+      fadeFrom.current = Number(getComputedStyle(container).opacity);
+      animation.cancel();
+    };
+  }, [active, container, side, visible]);
+  return {
+    /** On screen over the page, including while fading out. */
+    visible,
+    /** Keeps the container's own slide transition off while a peek owns its position. */
+    style: (): React.CSSProperties | undefined => {
+      if (active === "idle") return undefined;
+      return active === "parked" ? { opacity: 0, transition: "none" } : { transition: "none" };
+    },
+    containerRef: setContainer,
+    show,
+    cancelShow,
+  };
+}
+
 function Sidebar({
   side = "left",
   variant = "sidebar",
   collapsible = "offcanvas",
   resizable = false,
+  peekOnHover = false,
   className,
   children,
   ...props
@@ -281,9 +415,13 @@ function Sidebar({
   variant?: "sidebar" | "floating" | "inset";
   collapsible?: "offcanvas" | "icon" | "none";
   resizable?: boolean | SidebarResizableOptions;
+  /** While collapsed offcanvas, hovering the window edge slides the sidebar over the page. */
+  peekOnHover?: boolean;
 }) {
   const { isMobile, state, openMobile, setOpenMobile, setMobileSheetElement } = useSidebar();
   const offcanvasCollapsed = !isMobile && collapsible === "offcanvas" && state === "collapsed";
+  const peekEnabled = peekOnHover && offcanvasCollapsed;
+  const peek = useSidebarPeek(peekEnabled, side);
 
   const resolvedResizable = resolveSidebarResizable({ collapsible, isMobile, resizable });
   const instanceContextValue: SidebarInstanceContextProps = { side, resizable: resolvedResizable };
@@ -348,11 +486,25 @@ function Sidebar({
 
   return (
     <SidebarInstanceContext value={instanceContextValue}>
+      {/* Outside the sidebar root, which is inert while collapsed and ignores the pointer. */}
+      {peekEnabled ? (
+        <div
+          aria-hidden="true"
+          className={cn(
+            "fixed inset-y-0 z-20 hidden w-1.5 [-webkit-app-region:no-drag] md:block",
+            side === "left" ? "left-0" : "right-0",
+          )}
+          data-slot="sidebar-peek-zone"
+          onMouseEnter={peek.show}
+          onMouseLeave={peek.cancelShow}
+        />
+      ) : null}
       <div
         className="group peer hidden text-sidebar-foreground md:block"
         data-collapsible={state === "collapsed" ? collapsible : ""}
         data-collapsible-mode={collapsible}
-        inert={offcanvasCollapsed}
+        inert={offcanvasCollapsed && !peek.visible}
+        data-peeking={peek.visible ? "true" : undefined}
         data-side={side}
         data-slot="sidebar"
         data-state={state}
@@ -374,9 +526,14 @@ function Sidebar({
           className={cn(
             "fixed inset-y-0 z-10 hidden h-svh w-(--sidebar-width) md:flex",
             "[[data-panel-animations=true]_&]:transition-[left,right,width] [[data-panel-animations=true]_&]:[transition-duration:var(--panel-animation-duration)] [[data-panel-animations=true]_&]:ease-out",
-            side === "left"
-              ? "left-0 group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)]"
-              : "right-0 group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)]",
+            peek.visible
+              ? cn(
+                  "z-30 shadow-xl motion-reduce:transition-none!",
+                  side === "left" ? "left-0" : "right-0",
+                )
+              : side === "left"
+                ? "left-0 group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)]"
+                : "right-0 group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)]",
             variant === "floating" || variant === "inset"
               ? "p-2 group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)+(--spacing(4))+2px)]"
               : "group-data-[collapsible=icon]:w-(--sidebar-width-icon) group-data-[side=left]:border-r group-data-[side=right]:border-l",
@@ -384,6 +541,8 @@ function Sidebar({
           )}
           data-slot="sidebar-container"
           {...props}
+          {...(peekOnHover ? { ref: peek.containerRef } : {})}
+          {...(peekEnabled ? { style: { ...props.style, ...peek.style() } } : {})}
         >
           <div
             className="flex h-full w-full flex-col bg-sidebar surface-grain group-data-[variant=floating]:rounded-lg group-data-[variant=floating]:border group-data-[variant=floating]:border-sidebar-border group-data-[variant=floating]:shadow-sm/5"

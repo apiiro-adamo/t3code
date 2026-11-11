@@ -45,6 +45,8 @@ export const PullRequestListFilters = Schema.Struct({
   labels: Schema.optional(Schema.Array(PullRequestQualifierValues).check(Schema.isMaxLength(10))),
   excludedLabels: Schema.optional(PullRequestQualifierValues),
   author: Schema.optional(PullRequestQualifierValue),
+  /** A host team as `org/slug`; lists change requests opened by any of its members. */
+  team: Schema.optional(PullRequestQualifierValue),
 });
 export type PullRequestListFilters = typeof PullRequestListFilters.Type;
 
@@ -547,7 +549,12 @@ export const PullRequestListStatsResult = Schema.Struct({
 });
 export type PullRequestListStatsResult = typeof PullRequestListStatsResult.Type;
 
-export const PullRequestFilterOptionKind = Schema.Literals(["labels", "authors", "references"]);
+export const PullRequestFilterOptionKind = Schema.Literals([
+  "labels",
+  "authors",
+  "references",
+  "teams",
+]);
 export type PullRequestFilterOptionKind = typeof PullRequestFilterOptionKind.Type;
 
 /** Scoped like `PullRequestListInput`, so the options come from the repositories it lists. */
@@ -572,6 +579,14 @@ export const PullRequestReferenceCandidate = Schema.Struct({
 });
 export type PullRequestReferenceCandidate = typeof PullRequestReferenceCandidate.Type;
 
+/** A team on the host, which a listing can narrow to the change requests its members opened. */
+export const PullRequestTeam = Schema.Struct({
+  /** `org/slug`, the value a `team` filter takes. */
+  slug: TrimmedNonEmptyString,
+  name: Schema.String,
+});
+export type PullRequestTeam = typeof PullRequestTeam.Type;
+
 export const PullRequestFilterOptions = Schema.Struct({
   labels: Schema.Array(PullRequestLabel),
   authors: Schema.Array(PullRequestActor),
@@ -579,6 +594,7 @@ export const PullRequestFilterOptions = Schema.Struct({
   references: Schema.Array(PullRequestReferenceCandidate).pipe(
     Schema.withDecodingDefault(Effect.succeed([])),
   ),
+  teams: Schema.optional(Schema.Array(PullRequestTeam)),
   truncated: Schema.Boolean,
 });
 export type PullRequestFilterOptions = typeof PullRequestFilterOptions.Type;

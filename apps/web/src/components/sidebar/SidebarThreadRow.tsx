@@ -32,7 +32,7 @@ import {
   type ScopedThreadRef,
 } from "@t3tools/contracts";
 
-import type { TimestampFormat } from "@t3tools/contracts/settings";
+import type { ThreadStatusType, TimestampFormat } from "@t3tools/contracts/settings";
 import {
   AlarmClockIcon,
   AlarmClockOffIcon,
@@ -106,6 +106,9 @@ import {
 } from "../ThreadStatusIndicators";
 import { pickSnoozePreset, resolveSnoozePresets, type SnoozePreset } from "../Sidebar.snooze";
 import { useThreadShell } from "../../state/entities";
+import { useThreadStatus } from "../Sidebar.status";
+import { useClientSettings } from "../../hooks/useSettings";
+import { THREAD_STATUS_COLORS } from "../../threadStatus";
 import { ProjectFavicon, type ProjectFaviconProject } from "../ProjectFavicon";
 import { ThreadSearchMatchExcerpt } from "../ThreadSearchMatch";
 import { makeWorkspaceFileDropHandlers } from "../chat/workspaceFileDrop";
@@ -242,6 +245,7 @@ function SidebarThreadTooltip({
   branchMismatch,
   terminalStatus,
   terminalProcessCount,
+  threadStatus,
 }: {
   thread: SidebarThreadSummary;
   project: ProjectFaviconProject | null;
@@ -259,6 +263,7 @@ function SidebarThreadTooltip({
   } | null;
   terminalStatus: TerminalStatusIndicator | null;
   terminalProcessCount: number;
+  threadStatus?: ThreadStatusType | null | undefined;
 }) {
   const driverKind = providerEntry?.driverKind ?? null;
   const previousProviderNames = thread.providerInstanceHistory
@@ -277,6 +282,18 @@ function SidebarThreadTooltip({
           ) : null
         }
       >
+        {threadStatus ? (
+          <div className="flex min-w-0 items-center gap-2">
+            <span
+              aria-hidden
+              className={cn(
+                "size-2 shrink-0 rounded-full",
+                THREAD_STATUS_COLORS[threadStatus.color].swatchClassName,
+              )}
+            />
+            <div className="min-w-0 truncate text-foreground/75">{threadStatus.name}</div>
+          </div>
+        ) : null}
         {projectDisplayName ? (
           <div className="flex min-w-0 items-center gap-2">
             {project ? <ProjectFavicon project={project} className="size-3 shrink-0" /> : null}
@@ -657,6 +674,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   const threadRef = scopeThreadRef(thread.environmentId, thread.id);
   const threadKey = scopedThreadKey(threadRef);
   const canOperateThread = useEnvironmentScope(thread.environmentId, AuthOrchestrationOperateScope);
+  const threadStatus = useThreadStatus(thread.environmentId, thread.source.tags);
+  const statusFillsRow = useClientSettings((settings) => settings.threadStatusFillsRow);
   const { leaseLiveStatus, rowRef: leaseRowRef } = useSidebarRowSubscriptionLease(props.isActive);
   const { revealRef } = props;
   const rowRef = (row: HTMLElement | null) => {
@@ -828,8 +847,27 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
       branchMismatch={branchMismatch}
       terminalStatus={terminalStatus}
       terminalProcessCount={terminalProcessCount}
+      threadStatus={threadStatus}
     />
   );
+  // Out of flow, so the row's layout is the same with or without it. A bar along the left edge,
+  // or a tint behind the whole row: the row isolates, so the tint sits over the row's own
+  // background (hover, selection) but under its text.
+  const threadStatusBar = threadStatus ? (
+    <span
+      aria-hidden
+      data-thread-status={threadStatus.id}
+      className={cn(
+        "pointer-events-none absolute",
+        statusFillsRow
+          ? cn("inset-0 -z-10", THREAD_STATUS_COLORS[threadStatus.color].tintClassName)
+          : cn(
+              "inset-y-1.5 left-0.5 z-20 w-[3px] rounded-full",
+              THREAD_STATUS_COLORS[threadStatus.color].swatchClassName,
+            ),
+      )}
+    />
+  ) : null;
 
   const handleClick = (event: ReactMouseEvent) => {
     onThreadClick(event, threadRef);
@@ -975,6 +1013,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     isFileDragOver && !props.isActive && !isSelected && "bg-sidebar-row-hover",
     props.sortable?.isDragging &&
       "bg-sidebar bg-linear-to-b from-sidebar-row-active to-sidebar-row-active text-sidebar-foreground opacity-100 shadow-lg",
+    threadStatus && statusFillsRow && "isolate",
   );
   const sortable = props.sortable;
   const sortableRootProps = sortable
@@ -1010,7 +1049,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
 
   const accessibility = resolveSidebarRowAccessibility({
     title: thread.title,
-    statusLabel: topStatus?.label ?? null,
+    statusLabel: [topStatus?.label, threadStatus?.name].filter(Boolean).join(", ") || null,
     projectDisplayName: props.projectDisplayName,
     isActive: props.isActive,
   });
@@ -1242,6 +1281,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               />
             }
           >
+            {threadStatusBar}
             {/* `contents` keeps one-line rows a single flex row. */}
             <div className={multiline ? "flex h-6 min-w-0 items-center gap-2.5" : "contents"}>
               {accessibleTitle}
@@ -1432,6 +1472,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
           }
         >
           {accessibleTitle}
+          {threadStatusBar}
           <div
             className={cn(
               "relative z-10 h-[4.875rem] px-(--sidebar-row-content-inset) py-(--sidebar-content-inset)",

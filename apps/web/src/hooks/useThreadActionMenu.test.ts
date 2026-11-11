@@ -104,6 +104,10 @@ vi.mock("../components/Sidebar.snooze", () => ({
   ],
   snoozeWakeDescription: () => "later",
 }));
+vi.mock("../components/Sidebar.status", () => ({
+  readThreadStatusMenu: () => undefined,
+  THREAD_STATUS_SETTINGS_LINK: { to: "/settings/threads", hash: "thread-statuses" },
+}));
 vi.mock("./useCopyToClipboard", () => ({
   useCopyToClipboard: () => ({ copyToClipboard: () => recordEffect("copy") }),
 }));

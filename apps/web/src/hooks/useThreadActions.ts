@@ -51,6 +51,7 @@ import { clearThreadPreviewState } from "../previewStateStore";
 import { useRightPanelStore } from "../rightPanelStore";
 import { useTerminalUiStateStore } from "../terminalUiStateStore";
 import { buildThreadRouteParams, resolveThreadRouteRef } from "../threadRoutes";
+import { planThreadStatusChange } from "../threadStatus";
 import { formatWorktreePathForDisplay, getOrphanedWorktreePathForThread } from "../worktreeCleanup";
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
 import { useClientSettings } from "./useSettings";
@@ -296,6 +297,9 @@ export function useThreadActions() {
     reportFailure: false,
   });
   const setThreadAutoSettleMutation = useOrchestrationCommand(threadEnvironment.setAutoSettle, {
+    reportFailure: false,
+  });
+  const setThreadTagMutation = useOrchestrationCommand(threadEnvironment.setTag, {
     reportFailure: false,
   });
   const reorderPinnedThreadMutation = useOrchestrationCommand(threadEnvironment.reorderPin, {
@@ -727,6 +731,20 @@ export function useThreadActions() {
     });
   };
 
+  // One tag per write. A thread's commands run in order, so the new status lands before the
+  // old ones go, and a failed write stops there rather than leaving the thread with none.
+  const setThreadStatus = async (target: ScopedThreadRef, statusId: string | null) => {
+    const writes = planThreadStatusChange(readThreadShell(target)?.source.tags, statusId);
+    for (const write of writes) {
+      const result = await setThreadTagMutation({
+        environmentId: target.environmentId,
+        input: { threadId: target.threadId, ...write },
+      });
+      if (result._tag === "Failure") return result;
+    }
+    return AsyncResult.success(undefined);
+  };
+
   const pinThread = async (target: ScopedThreadRef, opts: { orderKey?: string } = {}) => {
     if (!readEnvironmentServerConfigLoaded(target.environmentId)) {
       return AsyncResult.failure(
@@ -1005,6 +1023,7 @@ export function useThreadActions() {
     reorderActiveThread,
     markThreadUnread,
     setThreadAutoSettle,
+    setThreadStatus,
     turnThreadIntoProject: (target: ScopedThreadRef) =>
       createProjectFromThread({
         environmentId: target.environmentId,

@@ -25,6 +25,7 @@ import {
   type PullRequestStackHead,
   type PullRequestActor,
   type PullRequestReferenceCandidate,
+  type PullRequestTeam,
   type PullRequestComment,
   type PullRequestCommit,
   type PullRequestFileViewed,
@@ -74,6 +75,8 @@ import {
   pullRequestLookup,
   toLabelCandidates,
   toRepositoryAuthors,
+  decodeTeamMembersJson,
+  decodeTeamsJson,
   toRepositoryReferences,
   referenceSearchQuery,
   searchPhrase,
@@ -93,6 +96,7 @@ import {
   toPullRequestWatchFingerprint,
   toReviewDismissalsPage,
   toReviewerCandidates,
+  withTeamCandidates,
   toReviewThreadCommentsPage,
   toLaterReviewThreadPage,
   toReviewThreadPage,
@@ -647,6 +651,16 @@ export class GitHubPullRequestApi extends Context.Service<
       GitHubPullRequestApiError
     >;
 
+    readonly listRepositoryTeams: (input: {
+      readonly cwd: string;
+      readonly repository: string;
+      readonly host: string;
+      readonly query?: string | undefined;
+    }) => Effect.Effect<
+      { readonly items: ReadonlyArray<PullRequestTeam>; readonly truncated: boolean },
+      GitHubPullRequestApiError
+    >;
+
     readonly searchRepositoryReferences: (input: {
       readonly cwd: string;
       readonly repository: string;
@@ -768,13 +782,22 @@ const REVIEW_QUALIFIERS = {
   none: "none",
 } as const;
 
+/** Filters with a `team` resolved to its members' logins, which GitHub search cannot expand. */
+type ResolvedListFilters = PullRequestListFilters & {
+  readonly teamMembers?: ReadonlyArray<string> | undefined;
+};
+
+const TEAM_SELECTOR = /^([A-Za-z0-9-]+)\/([A-Za-z0-9._-]+)$/;
+// GitHub lists at most a hundred per page; more authors than this overflow its search query.
+const TEAM_MEMBERS_MAX = 100;
+
 /** Labels/logins cannot contain quotes; strip them to prevent qualifier injection. */
 function qualifierValue(value: string): string {
   return `"${value.replaceAll('"', "").trim()}"`;
 }
 
 function filterQualifiers(
-  filters: PullRequestListFilters | undefined,
+  filters: ResolvedListFilters | undefined,
   viewer: string,
 ): ReadonlyArray<string> {
   if (filters === undefined) return [];
@@ -787,6 +810,8 @@ function filterQualifiers(
     ...(filters.author === undefined
       ? []
       : [`author:${qualifierValue(resolvePullRequestAuthorFilter(filters.author, viewer))}`]),
+    // Repeated author qualifiers mean OR to GitHub.
+    ...(filters.teamMembers ?? []).map((login) => `author:${qualifierValue(login)}`),
     ...(filters.draft === undefined ? [] : [`draft:${filters.draft === "only"}`]),
     ...(filters.review === undefined ? [] : [`review:${REVIEW_QUALIFIERS[filters.review]}`]),
     ...(filters.checks === undefined
@@ -797,7 +822,7 @@ function filterQualifiers(
 
 function matchesFilters(
   item: GitHubPullRequestListItem,
-  filters: PullRequestListFilters | undefined,
+  filters: ResolvedListFilters | undefined,
   viewer: string,
 ): boolean {
   if (filters === undefined) return true;
@@ -814,7 +839,9 @@ function matchesFilters(
     (filters.excludedLabels === undefined || !filters.excludedLabels.some(holds)) &&
     (filters.author === undefined ||
       item.author?.login.toLowerCase() ===
-        resolvePullRequestAuthorFilter(filters.author, viewer).toLowerCase())
+        resolvePullRequestAuthorFilter(filters.author, viewer).toLowerCase()) &&
+    (filters.teamMembers === undefined ||
+      filters.teamMembers.some((login) => login.toLowerCase() === item.author?.login.toLowerCase()))
   );
 }
 
@@ -824,7 +851,7 @@ function matchesUnsortedListing(
     readonly state: PullRequestListState;
     readonly involvement: PullRequestInvolvement;
     readonly viewer: string;
-    readonly filters?: PullRequestListFilters | undefined;
+    readonly filters?: ResolvedListFilters | undefined;
   },
 ): boolean {
   const matchesState = input.state === "all" || item.state === input.state;
@@ -848,7 +875,7 @@ function searchQuery(input: {
   readonly viewer: string;
   readonly query?: string | undefined;
   readonly cursor?: ProviderListCursor | undefined;
-  readonly filters?: PullRequestListFilters | undefined;
+  readonly filters?: ResolvedListFilters | undefined;
 }): string | null {
   if (input.repositories.length === 0) return null;
   const repositories = input.repositories.map((repository) => repository.trim());
@@ -1228,6 +1255,90 @@ export const make = Effect.gen(function* () {
       : Cache.invalidate(validators, key);
     return decoded;
   });
+
+  // A team filter lists change requests by its members, so each listing first asks who they are.
+  // The read revalidates, so an unchanged team costs no quota.
+  const resolveListFilters = <
+    Input extends {
+      readonly cwd: string;
+      readonly host: string;
+      readonly filters?: PullRequestListFilters | undefined;
+    },
+  >(
+    input: Input,
+  ): Effect.Effect<
+    Input & { readonly filters?: ResolvedListFilters | undefined },
+    GitHubPullRequestApiError
+  > => {
+    const team = input.filters?.team;
+    if (team === undefined) return Effect.succeed(input);
+    const selector = TEAM_SELECTOR.exec(team.trim());
+    const withMembers = (teamMembers: ReadonlyArray<string>) => ({
+      ...input,
+      filters: { ...input.filters, teamMembers },
+    });
+    if (selector === null) return Effect.succeed(withMembers([]));
+    return revalidatedRestRead({
+      cwd: input.cwd,
+      host: input.host,
+      operation: "listTeamMembers",
+      path: `orgs/${selector[1]}/teams/${selector[2]}/members?per_page=${TEAM_MEMBERS_MAX}`,
+      decode: decodeTeamMembersJson,
+    }).pipe(Effect.map(withMembers));
+  };
+
+  // Every team in the owner's organization the viewer can see; a personal owner, or a credential
+  // without organization access, falls back to the viewer's own teams there.
+  const readOwnerTeams = (input: {
+    readonly cwd: string;
+    readonly host: string;
+    readonly repository: string;
+  }) => {
+    const { owner } = parseRepositorySelector(input.repository);
+    const read = (path: string) =>
+      revalidatedRestRead({
+        cwd: input.cwd,
+        host: input.host,
+        operation: "listRepositoryTeams",
+        path,
+        decode: decodeTeamsJson(owner),
+      });
+    return read(`orgs/${owner}/teams?per_page=100`).pipe(
+      Effect.catch(() => read("user/teams?per_page=100")),
+    );
+  };
+
+  // GitHub's review-requested search counts requests to the viewer's teams, but the rows name only
+  // the team, so mark the ones asking a team the viewer is on. Without the teams, rows stay as read.
+  const markTeamReviewRequests = <Item extends GitHubPullRequestListItem>(
+    input: { readonly cwd: string; readonly host: string },
+    repositoryOf: (item: Item) => string,
+    items: ReadonlyArray<Item>,
+  ): Effect.Effect<ReadonlyArray<Item>> => {
+    if (!items.some((item) => (item.reviewRequestTeamSlugs?.length ?? 0) > 0)) {
+      return Effect.succeed(items);
+    }
+    return revalidatedRestRead({
+      cwd: input.cwd,
+      host: input.host,
+      operation: "listViewerTeams",
+      path: "user/teams?per_page=100",
+      decode: decodeTeamsJson(),
+    }).pipe(
+      Effect.map((teams) => {
+        const mine = new Set(teams.map((team) => team.slug.toLowerCase()));
+        return items.map((item) => {
+          const owner = repositoryOf(item).split("/")[0] ?? "";
+          return item.reviewRequestTeamSlugs?.some((slug) =>
+            mine.has(`${owner}/${slug}`.toLowerCase()),
+          )
+            ? { ...item, viewerTeamReviewRequested: true }
+            : item;
+        });
+      }),
+      Effect.orElseSucceed(() => items),
+    );
+  };
 
   const diffFilesPage = (input: {
     readonly cwd: string;
@@ -1773,186 +1884,204 @@ export const make = Effect.gen(function* () {
       return getRoutingIdentity(input).pipe(Effect.map((identity) => identity.viewer));
     }),
 
-    listPullRequests: Effect.fn("GitHubPullRequestApi.listPullRequests")(function (input) {
-      const fallbackMaxRows = Math.max(input.limit + 1, PULL_REQUEST_FALLBACK_MAX_ROWS);
-      const { owner, name } = parseRepositorySelector(input.repository);
-      const query = searchQuery({ ...input, repositories: [input.repository] });
-      if (query === null) {
-        return Effect.fail(
-          new GitHubRepositorySelectorError({
-            cwd: input.cwd,
-            operation: "listPullRequests",
-          }),
-        );
-      }
-      const target = { cwd: input.cwd, host: input.host, operation: "listPullRequests" };
-      const toPage = (
-        page: ReturnType<typeof toPullRequestRows>,
-      ): GitHubPullRequestListPage & { readonly pageInfo: GraphQLClient.PageInfo } => ({
-        items: page.rows.map((row) => row.item),
-        rawCount: page.rawCount,
-        endCursor: page.endCursor,
-        pageInfo: { hasNextPage: page.endCursor !== null, endCursor: page.endCursor },
-      });
-      /**
-       * Pages of up to a hundred until `rows` have arrived or GitHub has no more. Each page asks
-       * for only the rows still missing, so the last one does not overshoot.
-       */
-      const collect = Effect.fn("GitHubPullRequestApi.collect")(function* (
-        rows: number,
-        page: (
-          after: string | null,
-          rows: number,
-        ) => Effect.Effect<GitHubPullRequestListPage, GitHubPullRequestApiError>,
-      ) {
-        const countRows = (pages: ReadonlyArray<GitHubPullRequestListPage>) =>
-          pages.reduce((total, read) => total + read.rawCount, 0);
-        const pages: GitHubPullRequestListPage[] = [];
-        const seen = new Set<string>();
-        let after: string | null = null;
-        let truncated = false;
-        while (true) {
-          const read: GitHubPullRequestListPage = yield* page(after, rows - countRows(pages));
-          pages.push(read);
-          const next = read.endCursor;
-          if (next === null) break;
-          // `truncated` also covers a cursor GitHub repeated before `rows` arrived.
-          if (seen.has(next) || countRows(pages) >= rows) {
-            truncated = true;
-            break;
-          }
-          seen.add(next);
-          after = next;
-        }
-        return {
-          items: pages.flatMap((read) => read.items),
-          rawCount: countRows(pages),
-          truncated,
-        };
-      });
-      const stacks = input.host.toLowerCase() === "github.com";
-      const read = (
-        continues: boolean,
-        requestedRows = input.limit + 1,
-      ): Effect.Effect<GitHubPullRequestListBatch, GitHubPullRequestApiError> =>
-        collect(requestedRows, (after, rows) =>
-          (continues
-            ? client
-                .PullRequestSearch({
-                  q: query,
-                  first: pageRows(rows),
-                  after,
-                  // Stack badges come from their own batched read below, for the rows that stay.
-                  stacks: false,
-                  stats: true,
-                })
-                .pipe(Effect.map((result) => toPage(toPullRequestRows(result.search))))
-            : client
-                .PullRequestList({
-                  owner,
-                  name,
-                  states: LIST_STATES[input.state],
-                  first: pageRows(rows),
-                  after,
-                  stacks: false,
-                  stats: true,
-                })
-                .pipe(
-                  Effect.map((result) =>
-                    toPage(toPullRequestRows(result.repository?.pullRequests)),
-                  ),
-                )
-          ).pipe(graphql(target)),
-        ).pipe(
-          Effect.flatMap(({ items: rawItems, rawCount, truncated: cutShort }) => {
-            const items = continues
-              ? rawItems
-              : rawItems.filter((item) => matchesUnsortedListing(item, input));
-            if (
-              !continues &&
-              items.length < input.limit &&
-              rawCount >= requestedRows &&
-              requestedRows < fallbackMaxRows
-            ) {
-              const nextRows = Math.min(requestedRows * 2, fallbackMaxRows);
-              if (nextRows > requestedRows) return read(false, nextRows);
+    listPullRequests: Effect.fn("GitHubPullRequestApi.listPullRequests")(function (rawInput) {
+      return resolveListFilters(rawInput).pipe(
+        Effect.flatMap(
+          (input): Effect.Effect<GitHubPullRequestListBatch, GitHubPullRequestApiError> => {
+            // A team without members has no change requests to list.
+            if (input.filters?.teamMembers?.length === 0) {
+              return Effect.succeed({ items: [], truncated: false, continues: false });
             }
-            return Effect.succeed({
-              items: items.slice(0, input.limit),
-              // Probe one raw row past the limit; malformed rows must not prematurely end paging.
-              truncated:
-                cutShort ||
-                (continues
-                  ? rawCount > input.limit
-                  : items.length > input.limit || rawCount >= requestedRows),
-              continues,
-            });
-          }),
-        );
-      // Unindexed repositories silently return no search rows; fall back to the repository listing.
-      const hasQuery = (input.query?.trim().length ?? 0) > 0;
-      const listed = read(true).pipe(
-        Effect.filterOrElse(
-          (batch) => batch.items.length > 0 || input.cursor !== undefined || hasQuery,
-          () => read(false),
-        ),
-        Effect.filterOrElse(
-          (batch) => !stacks || batch.items.length === 0,
-          (batch) =>
-            Effect.forEach(
-              batch.items,
-              (item) => {
-                const lookup = pullRequestLookup({
-                  repository: input.repository,
-                  number: item.number,
-                });
-                if (lookup === null) return Effect.succeed(item);
-                return GraphQLResolver.request(lookup, stackMembershipResolver).pipe(
-                  Effect.map((result) => {
-                    const pullRequest = result.repository?.pullRequest;
-                    const stack = pullRequest == null ? undefined : toStackMembership(pullRequest);
-                    return stack === undefined ? item : { ...item, stack };
-                  }),
-                  Effect.catch((error) =>
-                    Effect.logWarning("Pull request stack membership enrichment failed", {
-                      operation: "listPullRequestStackMemberships",
-                      host: input.host,
-                      error: error._tag,
-                    }).pipe(Effect.as(item)),
-                  ),
-                );
-              },
-              { concurrency: "unbounded" },
-            ).pipe(
-              Effect.provideService(GitHubGraphQlClient.GitHubGraphQlTarget, {
-                host: input.host,
-                operation: "listPullRequestStackMemberships",
-              }),
-              Effect.map((items) => ({ ...batch, items })),
-            ),
-        ),
-      );
-      // GitHub answers a private repository the token cannot see as missing, and its error names
-      // the credential that request carried. A personal credential is pinned for the whole
-      // read, so a token changed mid-read does not split it; the app keeps the policy's fallback.
-      const host = normalizeHost(input.host);
-      return api.credential(host).pipe(
-        Effect.flatMap(({ token, fingerprint, source }) =>
-          source === undefined || source === "app"
-            ? listed
-            : listed.pipe(
-                Effect.provideService(GitHubRequestPolicy.PinnedGitHubCredential, {
-                  host,
-                  token,
-                  credentialFingerprint: fingerprint,
-                  source,
+            const fallbackMaxRows = Math.max(input.limit + 1, PULL_REQUEST_FALLBACK_MAX_ROWS);
+            const { owner, name } = parseRepositorySelector(input.repository);
+            const query = searchQuery({ ...input, repositories: [input.repository] });
+            if (query === null) {
+              return Effect.fail(
+                new GitHubRepositorySelectorError({
+                  cwd: input.cwd,
+                  operation: "listPullRequests",
                 }),
+              );
+            }
+            const target = { cwd: input.cwd, host: input.host, operation: "listPullRequests" };
+            const toPage = (
+              page: ReturnType<typeof toPullRequestRows>,
+            ): GitHubPullRequestListPage & { readonly pageInfo: GraphQLClient.PageInfo } => ({
+              items: page.rows.map((row) => row.item),
+              rawCount: page.rawCount,
+              endCursor: page.endCursor,
+              pageInfo: { hasNextPage: page.endCursor !== null, endCursor: page.endCursor },
+            });
+            /**
+             * Pages of up to a hundred until `rows` have arrived or GitHub has no more. Each page asks
+             * for only the rows still missing, so the last one does not overshoot.
+             */
+            const collect = Effect.fn("GitHubPullRequestApi.collect")(function* (
+              rows: number,
+              page: (
+                after: string | null,
+                rows: number,
+              ) => Effect.Effect<GitHubPullRequestListPage, GitHubPullRequestApiError>,
+            ) {
+              const countRows = (pages: ReadonlyArray<GitHubPullRequestListPage>) =>
+                pages.reduce((total, read) => total + read.rawCount, 0);
+              const pages: GitHubPullRequestListPage[] = [];
+              const seen = new Set<string>();
+              let after: string | null = null;
+              let truncated = false;
+              while (true) {
+                const read: GitHubPullRequestListPage = yield* page(after, rows - countRows(pages));
+                pages.push(read);
+                const next = read.endCursor;
+                if (next === null) break;
+                // `truncated` also covers a cursor GitHub repeated before `rows` arrived.
+                if (seen.has(next) || countRows(pages) >= rows) {
+                  truncated = true;
+                  break;
+                }
+                seen.add(next);
+                after = next;
+              }
+              return {
+                items: pages.flatMap((read) => read.items),
+                rawCount: countRows(pages),
+                truncated,
+              };
+            });
+            const stacks = input.host.toLowerCase() === "github.com";
+            const read = (
+              continues: boolean,
+              requestedRows = input.limit + 1,
+            ): Effect.Effect<GitHubPullRequestListBatch, GitHubPullRequestApiError> =>
+              collect(requestedRows, (after, rows) =>
+                (continues
+                  ? client
+                      .PullRequestSearch({
+                        q: query,
+                        first: pageRows(rows),
+                        after,
+                        // Stack badges come from their own batched read below, for the rows that stay.
+                        stacks: false,
+                        stats: true,
+                      })
+                      .pipe(Effect.map((result) => toPage(toPullRequestRows(result.search))))
+                  : client
+                      .PullRequestList({
+                        owner,
+                        name,
+                        states: LIST_STATES[input.state],
+                        first: pageRows(rows),
+                        after,
+                        stacks: false,
+                        stats: true,
+                      })
+                      .pipe(
+                        Effect.map((result) =>
+                          toPage(toPullRequestRows(result.repository?.pullRequests)),
+                        ),
+                      )
+                ).pipe(graphql(target)),
+              ).pipe(
+                Effect.flatMap(({ items: rawItems, rawCount, truncated: cutShort }) => {
+                  const items = continues
+                    ? rawItems
+                    : rawItems.filter((item) => matchesUnsortedListing(item, input));
+                  if (
+                    !continues &&
+                    items.length < input.limit &&
+                    rawCount >= requestedRows &&
+                    requestedRows < fallbackMaxRows
+                  ) {
+                    const nextRows = Math.min(requestedRows * 2, fallbackMaxRows);
+                    if (nextRows > requestedRows) return read(false, nextRows);
+                  }
+                  return Effect.succeed({
+                    items: items.slice(0, input.limit),
+                    // Probe one raw row past the limit; malformed rows must not prematurely end paging.
+                    truncated:
+                      cutShort ||
+                      (continues
+                        ? rawCount > input.limit
+                        : items.length > input.limit || rawCount >= requestedRows),
+                    continues,
+                  });
+                }),
+              );
+            // Unindexed repositories silently return no search rows; fall back to the repository listing.
+            const hasQuery = (input.query?.trim().length ?? 0) > 0;
+            const listed = read(true).pipe(
+              Effect.filterOrElse(
+                (batch) => batch.items.length > 0 || input.cursor !== undefined || hasQuery,
+                () => read(false),
               ),
+              Effect.filterOrElse(
+                (batch) => !stacks || batch.items.length === 0,
+                (batch) =>
+                  Effect.forEach(
+                    batch.items,
+                    (item) => {
+                      const lookup = pullRequestLookup({
+                        repository: input.repository,
+                        number: item.number,
+                      });
+                      if (lookup === null) return Effect.succeed(item);
+                      return GraphQLResolver.request(lookup, stackMembershipResolver).pipe(
+                        Effect.map((result) => {
+                          const pullRequest = result.repository?.pullRequest;
+                          const stack =
+                            pullRequest == null ? undefined : toStackMembership(pullRequest);
+                          return stack === undefined ? item : { ...item, stack };
+                        }),
+                        Effect.catch((error) =>
+                          Effect.logWarning("Pull request stack membership enrichment failed", {
+                            operation: "listPullRequestStackMemberships",
+                            host: input.host,
+                            error: error._tag,
+                          }).pipe(Effect.as(item)),
+                        ),
+                      );
+                    },
+                    { concurrency: "unbounded" },
+                  ).pipe(
+                    Effect.provideService(GitHubGraphQlClient.GitHubGraphQlTarget, {
+                      host: input.host,
+                      operation: "listPullRequestStackMemberships",
+                    }),
+                    Effect.map((items) => ({ ...batch, items })),
+                  ),
+              ),
+            );
+            // GitHub answers a private repository the token cannot see as missing, and its error names
+            // the credential that request carried. A personal credential is pinned for the whole
+            // read, so a token changed mid-read does not split it; the app keeps the policy's fallback.
+            const host = normalizeHost(input.host);
+            return api.credential(host).pipe(
+              Effect.flatMap(({ token, fingerprint, source }) =>
+                source === undefined || source === "app"
+                  ? listed
+                  : listed.pipe(
+                      Effect.provideService(GitHubRequestPolicy.PinnedGitHubCredential, {
+                        host,
+                        token,
+                        credentialFingerprint: fingerprint,
+                        source,
+                      }),
+                    ),
+              ),
+            );
+          },
+        ),
+        Effect.flatMap((batch) =>
+          markTeamReviewRequests(rawInput, () => rawInput.repository, batch.items).pipe(
+            Effect.map((items) => ({ ...batch, items })),
+          ),
         ),
       );
     }),
 
-    searchPullRequests: Effect.fn("GitHubPullRequestApi.searchPullRequests")(function* (input) {
+    searchPullRequests: Effect.fn("GitHubPullRequestApi.searchPullRequests")(function* (rawInput) {
+      const input = yield* resolveListFilters(rawInput);
+      if (input.filters?.teamMembers?.length === 0) return { items: [], truncated: false };
       const query = searchQuery(input);
       if (query === null) {
         return yield* new GitHubRepositorySelectorError({
@@ -1980,6 +2109,11 @@ export const make = Effect.gen(function* () {
               truncated: page.rawCount > input.limit || page.hasNextPage,
             };
           }),
+          Effect.flatMap((batch) =>
+            markTeamReviewRequests(input, (item) => item.repository, batch.items).pipe(
+              Effect.map((items) => ({ ...batch, items })),
+            ),
+          ),
         );
     }),
 
@@ -2325,6 +2459,14 @@ export const make = Effect.gen(function* () {
             graphql({ ...input, operation, allowReserve: true }),
             Effect.map((result) => toReviewerCandidates(result, input.query)),
             Effect.flatMap(found({ ...input, operation })),
+            // Teams are not assignable users, so they come from the organization's list. Without
+            // it the menu still offers people and the teams already asked.
+            Effect.flatMap((list) =>
+              readOwnerTeams(input).pipe(
+                Effect.map((teams) => withTeamCandidates(list, teams, input.query)),
+                Effect.orElseSucceed(() => list),
+              ),
+            ),
           );
       },
     ),
@@ -2379,6 +2521,21 @@ export const make = Effect.gen(function* () {
           );
       },
     ),
+
+    listRepositoryTeams: Effect.fn("GitHubPullRequestApi.listRepositoryTeams")(function (input) {
+      const query = input.query?.trim().toLowerCase() ?? "";
+      return readOwnerTeams(input).pipe(
+        Effect.map((teams) => {
+          const matching = teams.filter(
+            (team) =>
+              query.length === 0 ||
+              team.name.toLowerCase().includes(query) ||
+              team.slug.toLowerCase().includes(query),
+          );
+          return { items: matching, truncated: teams.length >= 100 };
+        }),
+      );
+    }),
 
     searchRepositoryReferences: Effect.fn("GitHubPullRequestApi.searchRepositoryReferences")(
       function (input) {

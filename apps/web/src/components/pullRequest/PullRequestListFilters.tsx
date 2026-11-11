@@ -20,6 +20,7 @@ import {
   SearchIcon,
   TagIcon,
   UserRoundIcon,
+  UsersRoundIcon,
 } from "lucide-react";
 import { type ElementType, useState } from "react";
 
@@ -266,7 +267,9 @@ function useHostedFilterOptions(
     })),
   );
   // Until the search catches up with the typing, the host's answers are for older text.
-  return sent === typed ? hosted : { labels: [], authors: [], error: null, isPending: true };
+  return sent === typed
+    ? hosted
+    : { labels: [], authors: [], teams: [], error: null, isPending: true };
 }
 
 function PullRequestAuthorChoices({
@@ -358,6 +361,102 @@ function PullRequestAuthorFilter({
           scope={scope}
           onChange={onChange}
         />
+      </MenuSubPopup>
+    </MenuSub>
+  );
+}
+
+function PullRequestTeamChoices({
+  value,
+  scope,
+  onChange,
+}: {
+  value: string | undefined;
+  scope: ReadonlyArray<PullRequestFilterOptionScope>;
+  onChange: (team: string | undefined) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const hosted = useHostedFilterOptions(scope, "teams", query);
+  const slug = value?.toLowerCase() ?? "";
+  // Projects across environments can list the same organization's teams more than once.
+  const teams = [
+    ...new Map(hosted.teams.map((team) => [team.slug.toLowerCase(), team])).values(),
+  ].toSorted((left, right) => left.name.localeCompare(right.name));
+  const selected =
+    value === undefined ? undefined : teams.find((team) => team.slug.toLowerCase() === slug);
+  const orgs = new Set(teams.map((team) => team.slug.split("/")[0]?.toLowerCase()));
+  return (
+    <>
+      <MenuSearchInput
+        autoFocus
+        busy={hosted.isPending}
+        value={query}
+        onChange={(event) => setQuery(event.currentTarget.value)}
+        placeholder="Search teams"
+        aria-label="Search teams"
+      />
+      <MenuRadioGroup
+        value={selected?.slug ?? value ?? ""}
+        onValueChange={(next: string) => next.toLowerCase() !== slug && onChange(next || undefined)}
+      >
+        <MenuRadioItem value="">
+          <span className="flex min-w-0 items-center gap-2">
+            <LayersIcon aria-hidden className="size-3.5" />
+            Any team
+          </span>
+        </MenuRadioItem>
+        {value !== undefined && selected === undefined ? (
+          <MenuRadioItem value={value}>
+            <span className="flex min-w-0 items-center gap-2">
+              <UsersRoundIcon aria-hidden className="size-3.5" />
+              <span className="min-w-0 flex-1 truncate">{value}</span>
+            </span>
+          </MenuRadioItem>
+        ) : null}
+        {teams.slice(0, 50).map((team) => (
+          <MenuRadioItem key={team.slug.toLowerCase()} value={team.slug}>
+            <span className="flex min-w-0 items-center gap-2">
+              <UsersRoundIcon aria-hidden className="size-3.5" />
+              <span className="min-w-0 flex-1 truncate">{team.name}</span>
+              {orgs.size > 1 ? (
+                <span className="shrink-0 text-xs text-muted-foreground">
+                  {team.slug.split("/")[0]}
+                </span>
+              ) : null}
+            </span>
+          </MenuRadioItem>
+        ))}
+        {teams.length === 0 && !hosted.isPending ? (
+          <MenuItem disabled>
+            {hosted.error === null ? "No teams found" : "Couldn't list teams on the host"}
+          </MenuItem>
+        ) : null}
+      </MenuRadioGroup>
+    </>
+  );
+}
+
+/** Narrows the listing to change requests opened by any member of a host team. */
+function PullRequestTeamFilter({
+  value,
+  scope,
+  onChange,
+}: {
+  value: string | undefined;
+  scope: ReadonlyArray<PullRequestFilterOptionScope>;
+  onChange: (team: string | undefined) => void;
+}) {
+  return (
+    <MenuSub>
+      <MenuSubTrigger>
+        <UsersRoundIcon aria-hidden className="size-3.5" />
+        <span className="flex-1">Team</span>
+        <span className="min-w-0 max-w-32 truncate text-xs text-muted-foreground">
+          {value?.split("/").at(-1) ?? "Any"}
+        </span>
+      </MenuSubTrigger>
+      <MenuSubPopup>
+        <PullRequestTeamChoices value={value} scope={scope} onChange={onChange} />
       </MenuSubPopup>
     </MenuSub>
   );
@@ -526,6 +625,7 @@ export function PullRequestFiltersMenu({
     filters.review,
     filters.checks,
     filters.author,
+    filters.team,
     ...selectedLabels,
   ].filter(Boolean).length;
   const updateFilters = (next: Partial<PullRequestListFilters>) =>
@@ -590,6 +690,11 @@ export function PullRequestFiltersMenu({
           options={authorOptions}
           scope={optionScope}
           onChange={(author) => updateFilters({ author })}
+        />
+        <PullRequestTeamFilter
+          value={filters.team}
+          scope={optionScope}
+          onChange={(team) => updateFilters({ team })}
         />
         <PullRequestLabelFilter
           value={selectedLabels}

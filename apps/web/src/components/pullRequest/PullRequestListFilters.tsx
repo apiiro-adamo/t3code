@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { type ElementType, useState } from "react";
 
+import { useClientSettings } from "~/hooks/useSettings";
 import { getSourceControlPresentationForKind } from "~/sourceControlPresentation";
 import { useDebouncedValue } from "~/state/queries";
 import { type EnvironmentQueryTarget, usePullRequestFilterOptions } from "~/state/pullRequests";
@@ -614,6 +615,7 @@ export function PullRequestFiltersMenu({
   unavailable: ReadonlyMap<string, string>;
   onProject: (projectId: ProjectId | undefined, environmentId: EnvironmentId | undefined) => void;
 }) {
+  const teamFilterEnabled = useClientSettings((settings) => settings.pullRequestTeamFilterEnabled);
   const selectedLabels = (filters.labels ?? []).flatMap((group) => group);
   const filterCount = [
     state !== "open",
@@ -691,11 +693,14 @@ export function PullRequestFiltersMenu({
           scope={optionScope}
           onChange={(author) => updateFilters({ author })}
         />
-        <PullRequestTeamFilter
-          value={filters.team}
-          scope={optionScope}
-          onChange={(team) => updateFilters({ team })}
-        />
+        {/* A team picked before the filter was turned off stays visible, so it can be cleared. */}
+        {teamFilterEnabled || filters.team !== undefined ? (
+          <PullRequestTeamFilter
+            value={filters.team}
+            scope={optionScope}
+            onChange={(team) => updateFilters({ team })}
+          />
+        ) : null}
         <PullRequestLabelFilter
           value={selectedLabels}
           options={labelOptions}

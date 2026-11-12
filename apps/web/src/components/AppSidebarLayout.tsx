@@ -31,7 +31,7 @@ import { selectActiveRightPanel, useRightPanelStore } from "../rightPanelStore";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { cn, isMacPlatform } from "../lib/utils";
 import { primaryServerKeybindingsAtom } from "../state/server";
-import { useEnvironmentIdentificationMode } from "../hooks/useSettings";
+import { useClientSettings, useEnvironmentIdentificationMode } from "../hooks/useSettings";
 import {
   PanelAnimationSuppressionProvider,
   usePanelAnimationSettings,
@@ -417,6 +417,7 @@ export function AppSidebarLayout({
     observedKey: null,
     pendingKey: null,
   }));
+  const sidebarPeekOnHover = useClientSettings((settings) => settings.sidebarPeekOnHover);
   const { active: panelAnimationsActive, durationMs: panelAnimationDurationMs } =
     usePanelAnimationSettings();
   const pathname = useLocation({ select: (location) => location.pathname });
@@ -466,7 +467,7 @@ export function AppSidebarLayout({
             <Sidebar
               side="left"
               collapsible="offcanvas"
-              peekOnHover
+              peekOnHover={sidebarPeekOnHover}
               data-app-sidebar=""
               {...sidebarArea}
               role="navigation"

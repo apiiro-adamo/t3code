@@ -65,6 +65,7 @@ import type { RightPanelSurface } from "~/rightPanelStore";
 import { cn } from "~/lib/utils";
 import { resolveShortcutCommand, type ShortcutMatchContext } from "~/keybindings";
 import { readLocalApi } from "~/localApi";
+import { useClientSettings } from "~/hooks/useSettings";
 import { useStableCallback } from "~/hooks/useStableCallback";
 import { Button } from "~/components/ui/button";
 import { MorphIcon } from "~/components/MorphIcon";
@@ -108,6 +109,8 @@ import { surfaceShortcutKey } from "~/lib/surfaceShortcutKey";
 export interface RightPanelTabsProps {
   mode: PreviewPanelMode;
   maximized?: boolean;
+  /** Double-clicking a tab fills the window with the panel, or brings it back. Inline only. */
+  onToggleMaximized?: (() => void) | undefined;
   open?: boolean;
   keybindings: ResolvedKeybindingsConfig;
   getShortcutContext: () => ShortcutMatchContext;
@@ -857,6 +860,7 @@ interface RightPanelTabHandlers {
   onContextMenu: (event: ReactMouseEvent, surface: RightPanelSurface) => void;
   onStartRename: (surfaceId: string) => void;
   onFinishRename: (surfaceId: string, title: string) => void;
+  onDoubleClick: (event: ReactMouseEvent) => void;
 }
 
 // Chromium on Linux only suppresses primary-selection paste when mouseup is cancelled.
@@ -895,6 +899,7 @@ function RightPanelTab(
     onContextMenu,
     onStartRename,
     onFinishRename,
+    onDoubleClick,
   } = props;
   const { listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: surface.id,
@@ -972,10 +977,14 @@ function RightPanelTab(
             render={
               <button
                 type="button"
-                onDoubleClick={() => {
-                  if (surface.kind === "device" && props.canRename) onStartRename(surface.id);
+                onDoubleClick={(event) => {
+                  if (surface.kind !== "device" || !props.canRename) return;
+                  // Renaming a device takes the double-click, so the panel keeps its size.
+                  event.stopPropagation();
+                  onStartRename(surface.id);
                 }}
                 className="cursor-pointer flex min-w-0 items-center"
+                data-tab-title=""
                 aria-label={sideChatState === null ? undefined : `${title}, ${sideChatState}`}
                 onClick={() => onActivate(surface)}
               >
@@ -1005,6 +1014,7 @@ function RightPanelTab(
       onMouseUp={preventTabMiddleButtonDefault}
       onAuxClick={(event) => onAuxClick(event, surface)}
       onContextMenu={(event) => onContextMenu(event, surface)}
+      onDoubleClick={onDoubleClick}
       {...listeners}
       ref={setNodeRef}
       style={{ transform: CSS.Translate.toString(transform), transition }}
@@ -1268,6 +1278,16 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
     },
   );
   const onStartRenameTab = useStableCallback((surfaceId: string) => setRenamingDevice(surfaceId));
+  const tabDoubleClickMaximizes = useClientSettings(
+    (settings) => settings.rightPanelTabDoubleClickMaximizes,
+  );
+  const onTabDoubleClick = useStableCallback((event: ReactMouseEvent) => {
+    if (!tabDoubleClickMaximizes || props.mode !== "inline") return;
+    // The tab's mute button and the close button over its icon act on their own clicks.
+    const target = event.target instanceof Element ? event.target : null;
+    if (target?.closest("input, button:not([data-tab-title])")) return;
+    props.onToggleMaximized?.();
+  });
   const onFinishRenameTab = useStableCallback((surfaceId: string, title: string) => {
     props.onRenameDevice?.(surfaceId, title);
     setRenamingDevice(null);
@@ -1386,6 +1406,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                     onContextMenu={onTabContextMenu}
                     onStartRename={onStartRenameTab}
                     onFinishRename={onFinishRenameTab}
+                    onDoubleClick={onTabDoubleClick}
                   />
                 );
               })}

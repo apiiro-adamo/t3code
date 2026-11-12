@@ -62,7 +62,6 @@ import { scopedIdleCompaction } from "./scopedSettings";
 import { ProjectDefaultsSettings } from "./ProjectDefaultsSettings";
 import { ThreadTitleInstructionsSettings } from "./ThreadTitleInstructionsSettings";
 import { SnoozePresetsRow } from "./SnoozePresetsSettings";
-import { ThreadStatusTypesRow } from "./ThreadStatusTypesSettings";
 import { useDesktopUpdateState } from "../../state/desktopUpdate";
 import { managedTelemetryOffMessage, usePrimaryManagedPolicy } from "../../state/managedPolicy";
 import {
@@ -430,6 +429,15 @@ function AboutVersionSection() {
   );
 }
 
+// Fork feature switches, named as Restore defaults lists them.
+const FORK_SWITCHES = [
+  ["threadStatusesEnabled", "Thread statuses"],
+  ["sidebarPeekOnHover", "Open sidebar on hover"],
+  ["pullRequestTeamFilterEnabled", "Pull request team filter"],
+  ["pullRequestTeamReviewersEnabled", "Team reviewers"],
+  ["rightPanelTabDoubleClickMaximizes", "Double-click tab to fill window"],
+] as const;
+
 export function useSettingsRestore(onRestored?: () => void) {
   const {
     theme,
@@ -573,6 +581,9 @@ export function useSettingsRestore(onRestored?: () => void) {
     ...(settings.threadStatusFillsRow !== DEFAULT_UNIFIED_SETTINGS.threadStatusFillsRow
       ? ["Status row coloring"]
       : []),
+    ...FORK_SWITCHES.filter(([key]) => settings[key] !== DEFAULT_UNIFIED_SETTINGS[key]).map(
+      ([, label]) => label,
+    ),
     ...(settings.confirmThreadDelete !== DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete
       ? ["Delete confirmation"]
       : []),
@@ -684,6 +695,11 @@ export function useSettingsRestore(onRestored?: () => void) {
       confirmThreadArchive: DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive,
       confirmThreadDelete: DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete,
       threadStatusFillsRow: DEFAULT_UNIFIED_SETTINGS.threadStatusFillsRow,
+      threadStatusesEnabled: DEFAULT_UNIFIED_SETTINGS.threadStatusesEnabled,
+      sidebarPeekOnHover: DEFAULT_UNIFIED_SETTINGS.sidebarPeekOnHover,
+      pullRequestTeamFilterEnabled: DEFAULT_UNIFIED_SETTINGS.pullRequestTeamFilterEnabled,
+      pullRequestTeamReviewersEnabled: DEFAULT_UNIFIED_SETTINGS.pullRequestTeamReviewersEnabled,
+      rightPanelTabDoubleClickMaximizes: DEFAULT_UNIFIED_SETTINGS.rightPanelTabDoubleClickMaximizes,
       confirmThreadUnpin: DEFAULT_UNIFIED_SETTINGS.confirmThreadUnpin,
       confirmQuit: DEFAULT_UNIFIED_SETTINGS.confirmQuit,
       textGenerationModelSelection: DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection,
@@ -1651,37 +1667,6 @@ export function ThreadsSettingsPanel() {
       {!isProjectScope ? (
         <SettingsSection id="snooze" title="Snooze">
           <SnoozePresetsRow />
-        </SettingsSection>
-      ) : null}
-
-      {!isProjectScope ? (
-        <SettingsSection id="statuses" title="Statuses">
-          <ThreadStatusTypesRow />
-          <SettingsRow
-            {...searchableSetting("thread-status-fills-row")}
-            description="Tint the whole sidebar row in its status color, instead of a bar along its left edge."
-            resetAction={
-              settings.threadStatusFillsRow !== DEFAULT_UNIFIED_SETTINGS.threadStatusFillsRow ? (
-                <SettingResetButton
-                  label="row coloring"
-                  onClick={() =>
-                    updateSettings({
-                      threadStatusFillsRow: DEFAULT_UNIFIED_SETTINGS.threadStatusFillsRow,
-                    })
-                  }
-                />
-              ) : null
-            }
-            control={
-              <Switch
-                checked={settings.threadStatusFillsRow}
-                onCheckedChange={(checked) =>
-                  updateSettings({ threadStatusFillsRow: Boolean(checked) })
-                }
-                aria-label="Color the whole row in its status color"
-              />
-            }
-          />
         </SettingsSection>
       ) : null}
 

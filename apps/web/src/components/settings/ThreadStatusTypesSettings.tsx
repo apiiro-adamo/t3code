@@ -46,7 +46,7 @@ function newStatus(types: ReadonlyArray<ThreadStatusType>): ThreadStatusType {
 }
 
 /** Edits the statuses offered in every thread's Status menu. */
-export function ThreadStatusTypesRow() {
+export function ThreadStatusTypesRow(props: { className?: string }) {
   const settings = useScopedSettings();
   const updateSettings = useUpdateScopedSettings();
   const saved = settings.threadStatusTypes;
@@ -71,6 +71,7 @@ export function ThreadStatusTypesRow() {
   return (
     <SettingsRow
       serverScoped
+      className={props.className}
       settingKeys={["threadStatusTypes"]}
       {...searchableSetting("thread-statuses")}
       description="Choices in every thread's Status menu. A thread with a status shows its color along the sidebar row's edge."

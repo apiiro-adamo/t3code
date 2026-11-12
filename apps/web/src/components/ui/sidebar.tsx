@@ -268,9 +268,9 @@ function resolveSidebarResizable({
   };
 }
 
-const SIDEBAR_PEEK_OPEN_DELAY_MS = 120;
-const SIDEBAR_PEEK_CLOSE_DELAY_MS = 250;
-const SIDEBAR_PEEK_FADE_MS = 180;
+const SIDEBAR_PEEK_OPEN_DELAY_MS = 60;
+const SIDEBAR_PEEK_CLOSE_DELAY_MS = 150;
+const SIDEBAR_PEEK_FADE_MS = 110;
 // Menus, dialogs and tooltips opened from the peeking sidebar render in portals outside it.
 const SIDEBAR_PEEK_POPUP = '[data-slot$="-popup"], [data-slot$="-positioner"]';
 

@@ -484,6 +484,23 @@ export const ClientSettingsSchema = Schema.Struct({
   confirmThreadUnpin: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   /** Tint a status's whole sidebar row in its color, rather than only a bar along its edge. */
   threadStatusFillsRow: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  // Fork features, each on unless turned off in Settings > Fork features.
+  /** Statuses in the thread menu, and their colors on sidebar rows. */
+  threadStatusesEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  /** A collapsed sidebar opens while the pointer rests on the window edge. */
+  sidebarPeekOnHover: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  /** The pull request list's Team filter. */
+  pullRequestTeamFilterEnabled: Schema.Boolean.pipe(
+    Schema.withDecodingDefault(Effect.succeed(true)),
+  ),
+  /** Teams among the reviewers a pull request can ask. */
+  pullRequestTeamReviewersEnabled: Schema.Boolean.pipe(
+    Schema.withDecodingDefault(Effect.succeed(true)),
+  ),
+  /** Double-clicking a right panel tab fills the window with the panel. */
+  rightPanelTabDoubleClickMaximizes: Schema.Boolean.pipe(
+    Schema.withDecodingDefault(Effect.succeed(true)),
+  ),
   diffFilesCollapsed: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   diffIgnoreWhitespace: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   diffLayout: DiffLayout.pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_DIFF_LAYOUT))),
@@ -2030,6 +2047,11 @@ export const ClientSettingsPatch = Schema.Struct({
   confirmQuit: Schema.optionalKey(QuitConfirmationMode),
   confirmThreadArchive: Schema.optionalKey(Schema.Boolean),
   threadStatusFillsRow: Schema.optionalKey(Schema.Boolean),
+  threadStatusesEnabled: Schema.optionalKey(Schema.Boolean),
+  sidebarPeekOnHover: Schema.optionalKey(Schema.Boolean),
+  pullRequestTeamFilterEnabled: Schema.optionalKey(Schema.Boolean),
+  pullRequestTeamReviewersEnabled: Schema.optionalKey(Schema.Boolean),
+  rightPanelTabDoubleClickMaximizes: Schema.optionalKey(Schema.Boolean),
   confirmThreadDelete: Schema.optionalKey(Schema.Boolean),
   confirmThreadUnpin: Schema.optionalKey(Schema.Boolean),
   diffFilesCollapsed: Schema.optionalKey(Schema.Boolean),

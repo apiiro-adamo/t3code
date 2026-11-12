@@ -2,6 +2,7 @@ import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
 import type { ThreadStatusType } from "@t3tools/contracts/settings";
 
+import { getClientSettings, useClientSettings } from "../hooks/useSettings";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { readThreadShell } from "../state/entities";
 import { serverEnvironment } from "../state/server";
@@ -9,12 +10,16 @@ import { resolveThreadStatus } from "../threadStatus";
 import type { ThreadActionMenuState } from "./threadActionMenu.logic";
 
 export const THREAD_STATUS_SETTINGS_LINK = {
-  to: "/settings/threads",
+  to: "/settings/fork",
   hash: "thread-statuses",
 } as const;
 
-/** The Status menu for a thread, from its environment's statuses, read when the menu opens. */
+/**
+ * The Status menu for a thread, from its environment's statuses, read when the menu opens.
+ * None while statuses are turned off in Fork features.
+ */
 export function readThreadStatusMenu(threadRef: ScopedThreadRef): ThreadActionMenuState["status"] {
+  if (!getClientSettings().threadStatusesEnabled) return undefined;
   const types = appAtomRegistry.get(
     serverEnvironment.settingsValueAtom(threadRef.environmentId),
   )?.threadStatusTypes;
@@ -28,6 +33,7 @@ export function useThreadStatus(
   environmentId: EnvironmentId,
   tags: ReadonlyArray<string> | undefined,
 ): ThreadStatusType | null {
+  const enabled = useClientSettings((settings) => settings.threadStatusesEnabled);
   const types = useAtomValue(serverEnvironment.settingsValueAtom(environmentId))?.threadStatusTypes;
-  return types === undefined ? null : resolveThreadStatus(tags, types);
+  return !enabled || types === undefined ? null : resolveThreadStatus(tags, types);
 }

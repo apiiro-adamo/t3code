@@ -3928,6 +3928,7 @@ export default function ChatView(props: ChatViewProps) {
           keybindings={keybindings}
           getShortcutContext={getShortcutContextStable}
           maximized={rightPanelMaximized}
+          onToggleMaximized={toggleRightPanelMaximizedStable}
           layoutControls={
             rightPanelOpen ? (
               <div className="mr-px flex items-center gap-1">

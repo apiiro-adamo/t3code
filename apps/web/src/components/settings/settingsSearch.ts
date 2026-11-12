@@ -36,6 +36,7 @@ export type SettingsPath =
   | "/settings/access"
   | "/settings/secrets"
   | "/settings/maintenance"
+  | "/settings/fork"
   | "/settings/labs"
   | "/settings/about"
   | "/settings/archived";
@@ -111,6 +112,7 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/access": "Sharing & access",
   "/settings/secrets": "Secrets",
   "/settings/maintenance": "Maintenance",
+  "/settings/fork": "Fork features",
   "/settings/labs": "Labs",
   "/settings/about": "About",
   "/settings/voice": "Voice",
@@ -158,7 +160,13 @@ export const SETTINGS_NAV_GROUPS: ReadonlyArray<{
   },
   {
     heading: null,
-    paths: ["/settings/maintenance", "/settings/labs", "/settings/about", "/settings/archived"],
+    paths: [
+      "/settings/maintenance",
+      "/settings/fork",
+      "/settings/labs",
+      "/settings/about",
+      "/settings/archived",
+    ],
   },
 ];
 
@@ -444,18 +452,56 @@ export const SETTINGS_SEARCH_ITEMS = [
     scope: "environment-defaults",
   },
   {
+    id: "thread-statuses-enabled",
+    title: "Thread statuses",
+    to: "/settings/fork",
+    searchTerms: ["fork status color label tag thread menu sidebar mark"],
+  },
+  {
     id: "thread-statuses",
     title: "Statuses",
-    to: "/settings/threads",
-    searchTerms: ["status color label tag in progress review blocked done sidebar mark"],
+    to: "/settings/fork",
+    // Shown inside the thread statuses row only while it is on, so search lands on the parent.
+    targetId: "thread-statuses-enabled",
+    searchTerms: ["fork status color label tag in progress review blocked done sidebar mark"],
     environmentOnly: true,
-    scope: "environment-defaults",
   },
   {
     id: "thread-status-fills-row",
     title: "Color whole row",
-    to: "/settings/threads",
-    searchTerms: ["status color background tint fill highlight sidebar row"],
+    to: "/settings/fork",
+    targetId: "thread-statuses-enabled",
+    searchTerms: ["fork status color background tint fill highlight sidebar row"],
+  },
+  {
+    id: "sidebar-peek-on-hover",
+    title: "Open sidebar on hover",
+    to: "/settings/fork",
+    searchTerms: ["fork collapsed sidebar peek hover edge reveal slide"],
+  },
+  {
+    id: "plan-limits-details",
+    title: "Plan limits in thread details",
+    to: "/settings/fork",
+    searchTerms: ["fork usage limits credits reset quota providers right panel"],
+  },
+  {
+    id: "pull-request-team-filter",
+    title: "Team filter for pull requests",
+    to: "/settings/fork",
+    searchTerms: ["fork pull request list filter team members authored"],
+  },
+  {
+    id: "pull-request-team-reviewers",
+    title: "Ask teams to review",
+    to: "/settings/fork",
+    searchTerms: ["fork pull request reviewers team request review picker"],
+  },
+  {
+    id: "right-panel-tab-double-click",
+    title: "Double-click a tab to fill the window",
+    to: "/settings/fork",
+    searchTerms: ["fork pull request tab double click maximize full screen right panel"],
   },
   {
     id: "snooze-limited-threads",
@@ -1361,6 +1407,7 @@ const SETTINGS_CATEGORY_SCOPES: Readonly<Record<SettingsPath, SettingsSearchScop
   "/settings/secrets": null,
   "/settings/scheduled-tasks": null,
   "/settings/maintenance": null,
+  "/settings/fork": null,
   "/settings/labs": null,
   "/settings/about": null,
   "/settings/archived": "project-defaults",

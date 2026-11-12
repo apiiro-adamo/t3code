@@ -12,6 +12,7 @@ import {
 import { CheckIcon, UserPlusIcon } from "lucide-react";
 import { useState } from "react";
 
+import { useClientSettings } from "~/hooks/useSettings";
 import { pullRequestEnvironment } from "~/state/pullRequests";
 import { useEnvironmentQuery } from "~/state/query";
 import { useDebouncedValue } from "~/state/queries";
@@ -67,10 +68,13 @@ export function PullRequestReviewerPicker({
     reportFailure: false,
   });
 
-  const { candidates, searchPending, searchError, truncation } = reviewerCandidateView({
-    ...searchInput,
-    search: searchResult,
-  });
+  const teamsEnabled = useClientSettings((settings) => settings.pullRequestTeamReviewersEnabled);
+  const view = reviewerCandidateView({ ...searchInput, search: searchResult });
+  const { searchPending, searchError, truncation } = view;
+  // Teams already asked stay listed while team reviewers are off, so the request can be taken back.
+  const candidates = teamsEnabled
+    ? view.candidates
+    : view.candidates.filter((candidate) => candidate.kind !== "team" || candidate.isRequested);
 
   const toggle = async (candidate: PullRequestReviewerCandidate) => {
     if (pending !== null) return;

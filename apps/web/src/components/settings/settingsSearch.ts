@@ -474,6 +474,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["fork status color background tint fill highlight sidebar row"],
   },
   {
+    id: "sidebar-group-by-status",
+    title: "Group Active by status",
+    to: "/settings/fork",
+    targetId: "thread-statuses-enabled",
+    searchTerms: ["fork status group sections headings sidebar active sort organize"],
+  },
+  {
     id: "sidebar-peek-on-hover",
     title: "Open sidebar on hover",
     to: "/settings/fork",

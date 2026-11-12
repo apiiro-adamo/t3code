@@ -18,6 +18,10 @@ import {
 } from "./threadDetailsCardLayout";
 import { observeResize } from "../../lib/observeResize";
 import { requestWorkspaceFocus } from "../../lib/workspaceFocus";
+import {
+  resetThreadDetailsPanelWidth,
+  startThreadDetailsPanelResize,
+} from "./threadDetailsPanelWidth";
 
 export function ThreadDetailsCard({
   threadRef,
@@ -164,6 +168,15 @@ export function ThreadDetailsCard({
           data-density={density}
           data-thread-details-panel="inline"
         >
+          {/* Drag the left edge to resize; double-click it to go back to the default width. */}
+          <div
+            aria-hidden
+            className="group/details-resize absolute inset-y-3 -left-1.5 z-10 flex w-3 cursor-ew-resize touch-none justify-center"
+            onPointerDown={(event) => startThreadDetailsPanelResize(event, placement.width)}
+            onDoubleClick={resetThreadDetailsPanelWidth}
+          >
+            <span className="h-full w-0.5 rounded-full bg-transparent transition-colors group-hover/details-resize:bg-border group-active/details-resize:bg-ring" />
+          </div>
           {card}
         </aside>
       ) : null}

@@ -487,6 +487,8 @@ export const ClientSettingsSchema = Schema.Struct({
   // Fork features, each on unless turned off in Settings > Fork features.
   /** Statuses in the thread menu, and their colors on sidebar rows. */
   threadStatusesEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  /** Active groups its threads under their statuses, as folders do in the project sidebar. */
+  sidebarGroupByStatus: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   /** A collapsed sidebar opens while the pointer rests on the window edge. */
   sidebarPeekOnHover: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   /** The pull request list's Team filter. */
@@ -497,6 +499,8 @@ export const ClientSettingsSchema = Schema.Struct({
   pullRequestTeamReviewersEnabled: Schema.Boolean.pipe(
     Schema.withDecodingDefault(Effect.succeed(true)),
   ),
+  /** The inline thread details card's width in pixels, set by dragging its left edge. */
+  threadDetailsPanelWidth: Schema.Number.pipe(Schema.withDecodingDefault(Effect.succeed(248))),
   /** Double-clicking a right panel tab fills the window with the panel. */
   rightPanelTabDoubleClickMaximizes: Schema.Boolean.pipe(
     Schema.withDecodingDefault(Effect.succeed(true)),
@@ -2048,10 +2052,12 @@ export const ClientSettingsPatch = Schema.Struct({
   confirmThreadArchive: Schema.optionalKey(Schema.Boolean),
   threadStatusFillsRow: Schema.optionalKey(Schema.Boolean),
   threadStatusesEnabled: Schema.optionalKey(Schema.Boolean),
+  sidebarGroupByStatus: Schema.optionalKey(Schema.Boolean),
   sidebarPeekOnHover: Schema.optionalKey(Schema.Boolean),
   pullRequestTeamFilterEnabled: Schema.optionalKey(Schema.Boolean),
   pullRequestTeamReviewersEnabled: Schema.optionalKey(Schema.Boolean),
   rightPanelTabDoubleClickMaximizes: Schema.optionalKey(Schema.Boolean),
+  threadDetailsPanelWidth: Schema.optionalKey(Schema.Number),
   confirmThreadDelete: Schema.optionalKey(Schema.Boolean),
   confirmThreadUnpin: Schema.optionalKey(Schema.Boolean),
   diffFilesCollapsed: Schema.optionalKey(Schema.Boolean),

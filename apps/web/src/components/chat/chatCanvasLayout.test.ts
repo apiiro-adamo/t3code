@@ -284,6 +284,7 @@ describe("chat canvas layout", () => {
         const card = resolveThreadDetailsCardLayout({
           container,
           lane: { padding: 48, minChatWidth: 640 },
+          width: 280,
           frame: result.frame,
           overlapsDetailsCard: result.overlapsDetailsCard,
         });
@@ -349,6 +350,7 @@ describe("workspace card beside chat", () => {
       const card = resolveThreadDetailsCardLayout({
         container,
         lane: { padding: 48, minChatWidth: 640 },
+        width: 280,
         frame: null,
       })!;
       const chat = withCard(width).chat;

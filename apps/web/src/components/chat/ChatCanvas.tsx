@@ -5,6 +5,7 @@ import type { ChatCanvasPreview } from "./chatCanvasLayout";
 import { resolveChatCanvasModel, type ChatCanvasStore } from "./canvasStore";
 import { selectThreadPanelOpen, useRightPanelStore } from "../../rightPanelStore";
 import { observeResize } from "../../lib/observeResize";
+import { useThreadDetailsPanelWidth } from "./threadDetailsPanelWidth";
 import type { ScopedThreadRef } from "@t3tools/contracts";
 
 export function ChatCanvas({
@@ -72,12 +73,14 @@ export function ChatCanvas({
       ? false
       : selectThreadPanelOpen(state.threadPanelVisibilityByThreadKey, threadRef, "inline"),
   );
+  const detailsCardWidth = useThreadDetailsPanelWidth();
   const model = resolveChatCanvasModel({
     measurements,
     detailsCardMeasurement,
     threadRef,
     preview,
     detailsCardInlineOpen,
+    detailsCardWidth,
   });
   const context = {
     container: model.container,

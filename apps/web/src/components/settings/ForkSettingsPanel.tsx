@@ -42,6 +42,12 @@ export function ForkSettingsPanel() {
                 className={NESTED_ROW_CLASS_NAME}
                 description="Tint the whole sidebar row in its status color, instead of a bar along its left edge."
               />
+              <ForkSwitchRow
+                id="sidebar-group-by-status"
+                settingKey="sidebarGroupByStatus"
+                className={NESTED_ROW_CLASS_NAME}
+                description="Split Active into a heading per status, in the order listed above, with threads without a status last. Off while project folders are on in Labs."
+              />
             </div>
           ) : null}
         </ForkSwitchRow>

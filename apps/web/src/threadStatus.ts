@@ -38,6 +38,49 @@ export function planThreadStatusChange(
   ];
 }
 
+export interface ThreadStatusGroup<Thread> {
+  /** The status id, or null for threads without one. */
+  readonly status: ThreadStatusType | null;
+  readonly threads: readonly Thread[];
+}
+
+/** Stores a group's collapsed state; never the id of a real status. */
+const NO_STATUS_GROUP_KEY = "no-status";
+
+export function threadStatusGroupKey(group: ThreadStatusGroup<unknown>): string {
+  return group.status?.id ?? NO_STATUS_GROUP_KEY;
+}
+
+/**
+ * Threads under their statuses in the order Settings lists them, then those without one.
+ * Threads keep their order within a group, and statuses no thread carries are left out.
+ */
+export function groupThreadsByStatus<Thread>(
+  threads: readonly Thread[],
+  statusOf: (thread: Thread) => ThreadStatusType | null,
+  order: readonly ThreadStatusType[],
+): ReadonlyArray<ThreadStatusGroup<Thread>> {
+  const byId = new Map<string, Thread[]>();
+  const none: Thread[] = [];
+  for (const thread of threads) {
+    const status = statusOf(thread);
+    if (status === null) {
+      none.push(thread);
+      continue;
+    }
+    const list = byId.get(status.id);
+    if (list) list.push(thread);
+    else byId.set(status.id, [thread]);
+  }
+  const groups: ThreadStatusGroup<Thread>[] = [];
+  for (const status of order) {
+    const list = byId.get(status.id);
+    if (list) groups.push({ status, threads: list });
+  }
+  if (none.length > 0) groups.push({ status: null, threads: none });
+  return groups;
+}
+
 /** Native menus draw no colored icons, so their labels lead with a colored emoji instead. */
 export const THREAD_STATUS_COLORS: Record<
   ThreadStatusColor,

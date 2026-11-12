@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { planThreadStatusChange, resolveThreadStatus } from "./threadStatus";
+import { groupThreadsByStatus, planThreadStatusChange, resolveThreadStatus } from "./threadStatus";
 
 const types = [
   { id: "in-progress", name: "In progress", color: "green" },
@@ -42,5 +42,29 @@ describe("planThreadStatusChange", () => {
     expect(planThreadStatusChange(["keep", "status:in-review"], null)).toEqual([
       { tag: "status:in-review", tagged: false },
     ]);
+  });
+});
+
+describe("groupThreadsByStatus", () => {
+  it("orders groups as Settings lists the statuses, then threads without one", () => {
+    const threads = [
+      { id: "a", status: types[1] },
+      { id: "b", status: null },
+      { id: "c", status: types[0] },
+      { id: "d", status: types[1] },
+    ];
+    const groups = groupThreadsByStatus(threads, (thread) => thread.status, types);
+    expect(
+      groups.map((group) => [group.status?.id ?? null, group.threads.map((thread) => thread.id)]),
+    ).toEqual([
+      ["in-progress", ["c"]],
+      ["in-review", ["a", "d"]],
+      [null, ["b"]],
+    ]);
+  });
+
+  it("leaves out statuses no thread carries", () => {
+    const groups = groupThreadsByStatus([{ status: null }], (thread) => thread.status, types);
+    expect(groups.map((group) => group.status)).toEqual([null]);
   });
 });

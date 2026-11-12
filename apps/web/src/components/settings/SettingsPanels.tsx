@@ -432,6 +432,7 @@ function AboutVersionSection() {
 // Fork feature switches, named as Restore defaults lists them.
 const FORK_SWITCHES = [
   ["threadStatusesEnabled", "Thread statuses"],
+  ["sidebarGroupByStatus", "Group Active by status"],
   ["sidebarPeekOnHover", "Open sidebar on hover"],
   ["pullRequestTeamFilterEnabled", "Pull request team filter"],
   ["pullRequestTeamReviewersEnabled", "Team reviewers"],
@@ -696,6 +697,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       confirmThreadDelete: DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete,
       threadStatusFillsRow: DEFAULT_UNIFIED_SETTINGS.threadStatusFillsRow,
       threadStatusesEnabled: DEFAULT_UNIFIED_SETTINGS.threadStatusesEnabled,
+      sidebarGroupByStatus: DEFAULT_UNIFIED_SETTINGS.sidebarGroupByStatus,
       sidebarPeekOnHover: DEFAULT_UNIFIED_SETTINGS.sidebarPeekOnHover,
       pullRequestTeamFilterEnabled: DEFAULT_UNIFIED_SETTINGS.pullRequestTeamFilterEnabled,
       pullRequestTeamReviewersEnabled: DEFAULT_UNIFIED_SETTINGS.pullRequestTeamReviewersEnabled,

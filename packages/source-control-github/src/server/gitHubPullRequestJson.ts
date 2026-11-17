@@ -19,6 +19,7 @@ import type {
   PullRequestTeam,
   PullRequestMergeCapabilities,
   PullRequestMergeMethod,
+  PullRequestMergeQueueRemoval,
   PullRequestOmittedFileStat,
   PullRequestMergeability,
   PullRequestReaction,
@@ -38,7 +39,10 @@ import type {
 } from "@t3tools/contracts";
 import { quoteGitPatchPath } from "@t3tools/shared/gitPatchPath";
 import { decodeJsonResult } from "@t3tools/shared/schemaJson";
-import { dedupeChecks } from "@t3tools/source-control-core/server/pullRequestChecks";
+import {
+  dedupeChecks,
+  rollupCheckStatuses,
+} from "@t3tools/source-control-core/server/pullRequestChecks";
 import type { ProviderChangeRequestSummary } from "@t3tools/source-control-core/server/PullRequestProvider";
 
 import type * as GitHubSchema from "../../schema/github.graphql.ts";
@@ -114,6 +118,7 @@ interface ListItemFields {
 interface LabelFields {
   readonly name: string;
   readonly color?: string | null | undefined;
+  readonly description?: string | null | undefined;
 }
 
 interface ReviewRequestFields {
@@ -187,7 +192,7 @@ export function gitHubReactionContent(
 }
 
 /** Keep the viewer in counts, not actors, to avoid duplicating 'You'. */
-function toReactions(
+export function toReactions(
   groups: ReadonlyArray<ReactionGroup> | null | undefined,
   viewer: string | null,
 ): ReadonlyArray<PullRequestReaction> {
@@ -216,6 +221,7 @@ const RawWorkflowRunsSchema = Schema.Struct({
       id: Schema.Int,
       name: Schema.optional(Schema.NullOr(Schema.String)),
       html_url: Schema.optional(Schema.NullOr(Schema.String)),
+      status: Schema.optional(Schema.NullOr(Schema.String)),
     }),
   ),
 });
@@ -387,6 +393,7 @@ export interface GitHubPullRequestActivity {
   readonly author: PullRequestActor | null;
   readonly comments: ReadonlyArray<PullRequestComment>;
   readonly commits: ReadonlyArray<PullRequestCommit>;
+  readonly truncated: boolean;
 }
 
 /** GitHub returns endCursor even on the last page; hasNextPage is authoritative. */
@@ -550,7 +557,9 @@ function toReviewDecision(value: string | null | undefined): PullRequestReviewDe
 function toLabels(raw: ReadonlyArray<LabelFields> | undefined): ReadonlyArray<PullRequestLabel> {
   return (raw ?? []).flatMap((label) => {
     const name = trimmed(label.name);
-    return name === null ? [] : [{ name, color: trimmed(label.color) }];
+    return name === null
+      ? []
+      : [{ name, color: trimmed(label.color), description: trimmed(label.description) }];
   });
 }
 
@@ -653,14 +662,10 @@ function toCheckEntries(raw: ReadonlyArray<CheckFields> | null | undefined): Rea
 function rollupChecksState(
   raw: ReadonlyArray<CheckFields> | null | undefined,
 ): PullRequestChecksState | null {
-  const statuses = [
+  return rollupCheckStatuses([
     ...toChecks(raw).map((check) => check.status),
     ...(raw ?? []).filter(isNamelessCheck).map((check) => toCheckStatus(check)),
-  ];
-  if (statuses.length === 0) return null;
-  if (statuses.includes("failure") || statuses.includes("cancelled")) return "failing";
-  if (statuses.includes("pending") || statuses.includes("action-required")) return "pending";
-  return statuses.includes("success") ? "passing" : null;
+  ]);
 }
 
 function toChecks(
@@ -1024,6 +1029,7 @@ export function toPullRequestWatchFingerprint(
       pr.headRefOid,
       stateCounts(contexts?.checkRunCountsByState ?? null),
       stateCounts(contexts?.statusContextCountsByState ?? null),
+      pr.mergeQueueRemovals?.filteredCount ?? 0,
     ].join(" "),
     remarks: [
       pr.comments.totalCount,
@@ -1036,6 +1042,7 @@ export function toPullRequestWatchFingerprint(
 }
 
 export interface GitHubPullRequestCore extends GitHubPullRequestDetail {
+  readonly mergeQueueRemoval?: PullRequestMergeQueueRemoval;
   readonly maintainerCanModify: boolean;
   readonly canEditMaintainerEdits: boolean;
   readonly reviewRequestTeams: ReadonlyArray<PullRequestActor>;
@@ -1055,7 +1062,17 @@ export function toPullRequestCore(result: PullRequestCore.Result): GitHubPullReq
   const pr = repository?.pullRequest;
   if (repository == null || pr == null) return null;
   const contexts = nodesOf(pr.commits)[0]?.commit.statusCheckRollup?.contexts;
+  const removal = nodesOf(pr.mergeQueueRemovals).at(-1);
   return {
+    ...(removal === undefined || !("id" in removal)
+      ? {}
+      : {
+          mergeQueueRemoval: {
+            id: removal.id,
+            removedAt: removal.createdAt,
+            reason: trimmed(removal.reason),
+          },
+        }),
     reviewRequestTeams: nodesOf(pr.reviewRequests).flatMap(
       ({ requestedReviewer }) => toRequestedTeam(requestedReviewer) ?? [],
     ),
@@ -1133,6 +1150,32 @@ export function decodeWorkflowRunsJson(
     })),
     rawCount: decoded.success.workflow_runs.length,
   });
+}
+
+// Approval-gated runs (action_required) are read separately as action-required checks.
+const UNFINISHED_WORKFLOW_RUN_STATUSES = new Set([
+  "requested",
+  "queued",
+  "pending",
+  "waiting",
+  "in_progress",
+]);
+
+/** Workflow runs GitHub has not finished, which may have no check runs on the head yet. */
+export function decodeUnfinishedWorkflowRunsJson(
+  raw: string,
+): Result.Result<ReadonlyArray<GitHubWorkflowRunApproval>, DecodeFailure> {
+  const decoded = decodeWorkflowRuns(raw);
+  if (!Result.isSuccess(decoded)) return Result.fail(decoded.failure);
+  return Result.succeed(
+    decoded.success.workflow_runs
+      .filter((run) => UNFINISHED_WORKFLOW_RUN_STATUSES.has(run.status ?? ""))
+      .map((run) => ({
+        id: run.id,
+        name: trimmed(run.name) ?? `Workflow run ${run.id}`,
+        url: trimmed(run.html_url),
+      })),
+  );
 }
 
 export function toPullRequestHeads(result: PullRequestHeads.Result): {
@@ -1328,6 +1371,7 @@ export function toReviewDismissalsPage(result: ReviewDismissals.Result): {
 }
 
 function toThreadComment(comment: ThreadComment, viewer: string | null): PullRequestThreadComment {
+  const reviewUrl = trimmed(comment.pullRequestReview?.url);
   return {
     id: comment.id,
     author: toActor(comment.author),
@@ -1335,6 +1379,7 @@ function toThreadComment(comment: ThreadComment, viewer: string | null): PullReq
     createdAt: comment.createdAt,
     editedAt: comment.lastEditedAt,
     url: trimmed(comment.url),
+    ...(reviewUrl === null ? {} : { reviewUrl }),
     reactions: toReactions(comment.reactionGroups, viewer),
   };
 }
